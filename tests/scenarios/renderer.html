@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Test: Renderer</title>
+</head>
+<body>
+<script type="module">
+import { injectShell, renderDiff } from '/tests/test-runner.js'
+injectShell('Pseudo-3D Renderer Test', 'src/core/renderer.js')
+
+// ── Constants — mirrors renderer.js. Tune here, then Show Code ───────────────
+const DEFAULTS = {
+  CANVAS_W:   640, CANVAS_H:   360,
+  HORIZON_Y:  140, TRACK_HALF: 200,
+  CAM_HEIGHT: 120, STRIPE_H:   6,
+  STRIPE_SKIP: 2,  EDGE_WIDTH:  3
+}
+let p = { ...DEFAULTS }
+let scrollSpeed = 3, scrollZ = 0
+let cameraX = 0, codeOpen = false
+let last = 0, frames = 0, fpsTimer = 0, animId = null
+
+document.body.insertAdjacentHTML('beforeend', `
+<div class="layout">
+  <div style="display:flex;flex-direction:column;gap:12px">
+    <div class="panel">
+      <div class="panel-head">Canvas Output <span style="color:#1D9E75;font-size:.65rem" id="fps">— fps</span></div>
+      <div class="panel-body" style="padding:.5rem">
+        <canvas id="c" style="width:100%;border-radius:4px;image-rendering:pixelated;display:block"></canvas>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">Scroll Controls</div>
+      <div class="panel-body">
+        <div class="ctrl">
+          <label>Scroll speed <span class="val-display" id="speedDisplay">3.0</span></label>
+          <input type="range" min="0" max="12" step="0.5" value="3" oninput="scrollSpeed=+this.value;document.getElementById('speedDisplay').textContent=this.value"/>
+        </div>
+        <div class="ctrl">
+          <label>Camera X offset <span class="val-display" id="camDisplay">0</span></label>
+          <input type="range" min="-200" max="200" value="0" oninput="cameraX=+this.value;document.getElementById('camDisplay').textContent=this.value"/>
+        </div>
+        <button onclick="cameraX=0;document.querySelector('[oninput*=camDisplay]').value=0;document.getElementById('camDisplay').textContent=0"
+          style="font-size:.7rem;padding:.3rem .75rem;border:1px solid #333;background:transparent;color:#666;cursor:pointer;border-radius:4px;font-family:monospace">Reset camera</button>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:12px">
+    <div class="panel">
+      <div class="panel-head">Renderer Constants</div>
+      <div class="panel-body">
+        ${makeSlider('Horizon Y','HORIZON_Y',60,280,1,'px')}
+        ${makeSlider('Track half-width','TRACK_HALF',80,400,10,'px')}
+        ${makeSlider('Camera height','CAM_HEIGHT',40,300,10,'px')}
+        ${makeSlider('Stripe thickness','STRIPE_H',2,16,1,'px')}
+        ${makeSlider('Stripe skip','STRIPE_SKIP',0,10,1,'px')}
+        ${makeSlider('Edge line width','EDGE_WIDTH',1,8,1,'px')}
+        <button class="show-code-btn" id="showCodeBtn" onclick="toggleCode()">Show code changes</button>
+        <button onclick="storeAndLaunchTestGame()" style="background: #f0c040; color: #000; margin-top: 0.5rem;">▶ Test Game with Current Settings</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="code-panel" id="codePanel">
+  <div class="code-panel-head">Files to update <button onclick="copyAllCode()" style="font-size:.65rem;padding:2px 8px;border:1px solid #222;background:transparent;color:#555;cursor:pointer;font-family:monospace">Copy all</button></div>
+  <div id="diffContent"></div>
+</div>
+`)
+
+function makeSlider(label, key, min, max, step, unit) {
+  return `<div class="ctrl">
+    <label>${label} <span class="val-display" id="${key}Display">${DEFAULTS[key]}${unit}</span></label>
+    <input type="range" min="${min}" max="${max}" step="${step}" value="${DEFAULTS[key]}" oninput="onSlider('${key}',this.value,'${unit}')"/>
+  </div>`
+}
+window.onSlider = function(key, val, unit) {
+  p[key] = parseFloat(val)
+  document.getElementById(key+'Display').textContent = val + unit
+  if (codeOpen) buildDiffContent()
+}
+
+// ── Renderer ─────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c')
+canvas.width  = DEFAULTS.CANVAS_W
+canvas.height = DEFAULTS.CANVAS_H
+const ctx = canvas.getContext('2d')
+
+function drawFrame(ts) {
+  const dt = Math.min((ts - last) / 1000, 0.05)
+  last = ts
+  scrollZ += scrollSpeed * dt
+  frames++; fpsTimer += dt
+  if (fpsTimer >= 1) {
+    document.getElementById('fps').textContent = frames + ' fps'
+    frames = 0; fpsTimer = 0
+  }
+
+  const { CANVAS_W: W, CANVAS_H: H, HORIZON_Y, TRACK_HALF, CAM_HEIGHT, STRIPE_H, STRIPE_SKIP, EDGE_WIDTH } = p
+
+  // Sky
+  ctx.fillStyle = '#0a0a1a'
+  ctx.fillRect(0, 0, W, HORIZON_Y)
+
+  // Stars
+  ctx.fillStyle = 'rgba(255,255,255,0.6)'
+  for (let i = 0; i < 40; i++) {
+    const sx = (i * 173.3) % W
+    const sy = (i * 97.7) % HORIZON_Y
+    ctx.fillRect(sx, sy, 1, 1)
+  }
+
+  // Scanline track
+  const stripeOffset = Math.floor(scrollZ * 20) % (STRIPE_H + STRIPE_SKIP + 1)
+  for (let y = HORIZON_Y; y < H; y += STRIPE_H + STRIPE_SKIP) {
+    const scale     = CAM_HEIGHT / Math.max(y - HORIZON_Y, 1)
+    const halfW     = TRACK_HALF * scale
+    const sx        = W / 2 - halfW - cameraX * scale
+    const sw        = halfW * 2
+    const stripeIdx = Math.floor((y + stripeOffset) / (STRIPE_H + STRIPE_SKIP))
+    ctx.fillStyle   = stripeIdx % 2 === 0 ? '#1a1a2e' : '#141428'
+    ctx.fillRect(sx, y, sw, STRIPE_H)
+    // Edge lines
+    ctx.fillStyle = '#f0c040'
+    ctx.fillRect(sx, y, EDGE_WIDTH, STRIPE_H)
+    ctx.fillRect(sx + sw - EDGE_WIDTH, y, EDGE_WIDTH, STRIPE_H)
+    // Center dash
+    if (stripeIdx % 4 === 0) {
+      ctx.fillStyle = '#ffffff22'
+      ctx.fillRect(W/2 - 2, y, 4, STRIPE_H)
+    }
+  }
+
+  // Horizon line
+  ctx.fillStyle = '#f0c04022'
+  ctx.fillRect(0, HORIZON_Y, W, 1)
+
+  animId = requestAnimationFrame(drawFrame)
+}
+animId = requestAnimationFrame(drawFrame)
+
+// ── Code diff ─────────────────────────────────────────────────────────────────
+window.toggleCode = function() {
+  codeOpen = !codeOpen
+  document.getElementById('codePanel').classList.toggle('open', codeOpen)
+  document.getElementById('showCodeBtn').classList.toggle('open', codeOpen)
+  document.getElementById('showCodeBtn').textContent = codeOpen ? 'Hide code changes' : 'Show code changes'
+  if (codeOpen) buildDiffContent()
+}
+function buildDiffContent() {
+  const files = [{
+    path: 'src/core/renderer.js',
+    note: 'Update these constants at the top of the file.',
+    lines: [
+      { type:'comment', text:'// ── Renderer constants ─────────────────────────' },
+      ...Object.keys(DEFAULTS).filter(k => k!=='CANVAS_W' && k!=='CANVAS_H').map(k => {
+        const changed = p[k] !== DEFAULTS[k]
+        return changed
+          ? [{ type:'remove', text:`const ${k.padEnd(12)} = ${DEFAULTS[k]}` }, { type:'add', text:`const ${k.padEnd(12)} = ${p[k]}` }]
+          : [{ type:'ctx',    text:`const ${k.padEnd(12)} = ${p[k]}` }]
+      }).flat()
+    ]
+  }]
+  renderDiff(document.getElementById('diffContent'), files)
+}
+
+// Store test settings and launch test game for renderer scenario
+window.storeAndLaunchTestGame = () => {
+  // Store renderer constants
+  sessionStorage.setItem('testCANVAS_W', p.CANVAS_W);
+  sessionStorage.setItem('testCANVAS_H', p.CANVAS_H);
+  sessionStorage.setItem('testHORIZON_Y', p.HORIZON_Y);
+  sessionStorage.setItem('testTRACK_HALF', p.TRACK_HALF);
+  sessionStorage.setItem('testCAM_HEIGHT', p.CAM_HEIGHT);
+  sessionStorage.setItem('testSTRIPE_H', p.STRIPE_H);
+  sessionStorage.setItem('testSTRIPE_SKIP', p.STRIPE_SKIP);
+  sessionStorage.setItem('testEDGE_WIDTH', p.EDGE_WIDTH);
+  // Store scroll speed and camera X if needed
+  sessionStorage.setItem('testScrollSpeed', scrollSpeed);
+  sessionStorage.setItem('testCameraX', cameraX);
+  // Navigate to test game page
+  window.location.href = '/tests/test-game.html';
+}
+window.copyAllCode = function() {
+  navigator.clipboard.writeText(document.getElementById('diffContent').innerText)
+}
+</script>
+</body>
+</html>

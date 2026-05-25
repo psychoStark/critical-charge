@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Critical Charge — Test Harness</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#07070f;font-family:'Courier New',monospace;color:#ccc;min-height:100vh;padding:2rem}
+    .header{margin-bottom:2.5rem}
+    .logo{font-size:1.4rem;color:#f0c040;letter-spacing:.15em;font-weight:bold}
+    .logo span{color:#E24B4A}
+    .subtitle{font-size:.75rem;color:#444;margin-top:.3rem;letter-spacing:.08em;text-transform:uppercase}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1rem}
+    .test-card{border:1px solid #1a1a2e;border-radius:6px;overflow:hidden;transition:border-color .2s,transform .15s;text-decoration:none;display:block}
+    .test-card:hover{border-color:#f0c040;transform:translateY(-2px)}
+    .card-top{padding:1rem 1.25rem;background:#0d0d1f}
+    .card-icon{font-size:1.5rem;margin-bottom:.5rem}
+    .card-title{font-size:.9rem;color:#f0c040;font-weight:bold;letter-spacing:.05em}
+    .card-file{font-size:.7rem;color:#444;margin-top:.25rem}
+    .card-bottom{padding:.75rem 1.25rem;background:#0a0a18}
+    .card-desc{font-size:.75rem;color:#666;line-height:1.6}
+    .tag-row{display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap}
+    .tag{font-size:.65rem;padding:2px 7px;border-radius:99px;border:1px solid #1a1a2e;color:#555}
+    .tag.api{border-color:#1D9E75;color:#1D9E75}
+    .tag.canvas{border-color:#378ADD;color:#378ADD}
+    .tag.input{border-color:#7F77DD;color:#7F77DD}
+    .tag.sim{border-color:#EF9F27;color:#EF9F27}
+    .tag.math{border-color:#E24B4A;color:#E24B4A}
+    .status-bar{display:flex;align-items:center;gap:1rem;padding:.6rem 1rem;background:#0d0d1f;border:1px solid #1a1a2e;border-radius:6px;margin-bottom:1.5rem;font-size:.75rem;color:#555}
+    .status-dot{width:7px;height:7px;border-radius:50%;background:#1D9E75;box-shadow:0 0 6px #1D9E75;animation:blink 2s infinite}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+    .status-dot.warn{background:#EF9F27;box-shadow:0 0 6px #EF9F27}
+    .section-label{font-size:.7rem;color:#333;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.75rem}
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">⚡ CRITICAL <span>CHARGE</span></div>
+    <div class="subtitle">Test Harness — Dev Only — Not included in production build</div>
+  </div>
+  <div class="status-bar">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">Checking Battery API...</span>
+  </div>
+  <div class="section-label">Scenario Tests</div>
+  <div class="grid">
+    <a class="test-card" href="/tests/all.html">
+      <div class="card-top"><div class="card-icon">🎛️</div><div class="card-title">All Test Controls</div><div class="card-file">All game parameters</div></div>
+      <div class="card-bottom"><div class="card-desc">Tweak every game parameter in one place and test run the game.</div><div class="tag-row"><span class="tag sim">Master tuner</span></div></div>
+    </a>
+    <a class="test-card" href="/tests/scenarios/battery.html">
+      <div class="card-top"><div class="card-icon">🔋</div><div class="card-title">Battery API</div><div class="card-file">src/core/battery.js</div></div>
+      <div class="card-bottom"><div class="card-desc">Hardware gate, live level, charging state. Full battery simulator — test without real API.</div><div class="tag-row"><span class="tag api">Battery API</span><span class="tag sim">Simulator</span><span class="tag math">Gate logic</span></div></div>
+    </a>
+    <a class="test-card" href="/tests/scenarios/renderer.html">
+      <div class="card-top"><div class="card-icon">🎮</div><div class="card-title">Pseudo-3D Renderer</div><div class="card-file">src/core/renderer.js</div></div>
+      <div class="card-bottom"><div class="card-desc">Live canvas with all renderer constants exposed. Tune horizon, scanlines, track width. Show code exports diffs.</div><div class="tag-row"><span class="tag canvas">Canvas 2D</span><span class="tag math">Mode 7</span><span class="tag sim">Live tune</span></div></div>
+    </a>
+    <a class="test-card" href="/tests/scenarios/input.html">
+      <div class="card-top"><div class="card-icon">🕹️</div><div class="card-title">Input System</div><div class="card-file">src/core/input.js</div></div>
+      <div class="card-bottom"><div class="card-desc">Visualise keyboard, touch swipe, and device tilt live. Shows inputState updating in real time.</div><div class="tag-row"><span class="tag input">Keyboard</span><span class="tag input">Touch</span><span class="tag input">Tilt</span></div></div>
+    </a>
+    <a class="test-card" href="/tests/scenarios/obstacles.html">
+      <div class="card-top"><div class="card-icon">🚧</div><div class="card-title">Obstacle System</div><div class="card-file">src/systems/obstacle-manager.js</div></div>
+      <div class="card-bottom"><div class="card-desc">Spawn, scale and cull obstacles. Test Z-depth projection, horizon culling, spawn rate at any battery level.</div><div class="tag-row"><span class="tag math">Z-depth</span><span class="tag canvas">Scaling</span><span class="tag sim">Spawn sim</span></div></div>
+    </a>
+    <a class="test-card" href="/tests/scenarios/velocity.html">
+      <div class="card-top"><div class="card-icon">📈</div><div class="card-title">Velocity Curve</div><div class="card-file">src/core/battery.js</div></div>
+      <div class="card-bottom"><div class="card-desc">Plot and tune the battery→speed inverse curve. Adjust min/max speed, curve exponent, gate difficulty. Show code outputs exact diffs.</div><div class="tag-row"><span class="tag math">Formula</span><span class="tag sim">Curve tuner</span><span class="tag api">Battery sim</span></div></div>
+    </a>
+  </div>
+  <script>
+    async function checkBattery() {
+      const dot = document.getElementById('statusDot')
+      const txt = document.getElementById('statusText')
+      if (!navigator.getBattery) {
+        dot.className = 'status-dot warn'
+        txt.textContent = 'Battery API unavailable — use the simulator in each test'
+        return
+      }
+      try {
+        const b = await navigator.getBattery()
+        txt.textContent = `Battery API OK — Level: ${Math.round(b.level*100)}%  |  Charging: ${b.charging}`
+      } catch(e) {
+        dot.className = 'status-dot warn'
+        txt.textContent = 'Battery API threw an error — simulator mode available'
+      }
+    }
+    checkBattery()
+  </script>
+</body>
+</html>

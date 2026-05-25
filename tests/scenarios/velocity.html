@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Test: Velocity Curve</title>
+</head>
+<body>
+<script type="module">
+import { getBattery, injectShell, renderDiff } from '/tests/test-runner.js'
+injectShell('Velocity Curve Tuner', 'src/core/battery.js + src/systems/obstacle-manager.js')
+
+const DEFAULTS = { minSpeed:1.0, maxSpeed:8.0, exp:1.0, gateEasy:80, gateHard:25 }
+let p = { ...DEFAULTS }
+let codeOpen = false
+let battery, simulated, liveLevel = 0.5
+
+document.body.insertAdjacentHTML('beforeend', `
+<div class="layout">
+  <div style="display:flex;flex-direction:column;gap:12px">
+
+    <div class="panel">
+      <div class="panel-head">Velocity Curve <span id="liveDot" style="font-size:.65rem;color:#E24B4A"></span></div>
+      <div class="panel-body" style="padding:.5rem">
+        <canvas id="curve" width="560" height="240" style="width:100%;display:block;image-rendering:pixelated;border-radius:4px"></canvas>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">Stats at key battery levels</div>
+      <div class="panel-body">
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div class="stat-box" style="flex:1">
+            <div class="stat-label">100% — Full charge</div>
+            <div class="stat-value" id="s100">—</div>
+            <div class="stat-sub">gate <span id="g100">—</span> open</div>
+          </div>
+          <div class="stat-box" style="flex:1">
+            <div class="stat-label">50% — Half</div>
+            <div class="stat-value" id="s50">—</div>
+            <div class="stat-sub">gate <span id="g50">—</span> open</div>
+          </div>
+          <div class="stat-box" style="flex:1;border-color:#E24B4A22">
+            <div class="stat-label" style="color:#E24B4A">20% — Critical zone</div>
+            <div class="stat-value" id="s20" style="color:#E24B4A">—</div>
+            <div class="stat-sub">gate <span id="g20">—</span> open</div>
+          </div>
+          <div class="stat-box" style="flex:1">
+            <div class="stat-label">0% — Dead</div>
+            <div class="stat-value" id="s0">—</div>
+            <div class="stat-sub">gate <span id="g0">—</span> open</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:12px">
+    <div class="panel">
+      <div class="panel-head">Battery Simulator <span id="battModeBadge"></span></div>
+      <div class="panel-body">
+        <div class="toggle-row">
+          <input type="checkbox" id="simToggle" onchange="toggleSim()"/>
+          <label for="simToggle" style="display:inline;margin:0;color:#EF9F27;cursor:pointer">Force simulator</label>
+        </div>
+        <div id="simCtrls" style="opacity:.4;pointer-events:none">
+          <div class="ctrl">
+            <label>Simulated level <span class="val-display" id="simLvlDisp">50%</span></label>
+            <input type="range" min="0" max="100" value="50" oninput="setSimLevel(+this.value)"/>
+          </div>
+          <button onclick="autoDrain()" style="font-size:.7rem;padding:.3rem .75rem;border:1px solid #333;background:transparent;color:#666;cursor:pointer;border-radius:4px;font-family:monospace;margin-right:4px">Auto drain</button>
+          <button onclick="stopDrain()" style="font-size:.7rem;padding:.3rem .75rem;border:1px solid #333;background:transparent;color:#666;cursor:pointer;border-radius:4px;font-family:monospace">Stop</button>
+        </div>
+        <div style="margin-top:.75rem;font-size:.75rem;color:#555">
+          Live level: <span id="liveLvl" style="color:#f0c040">—</span> &nbsp; Speed: <span id="liveSpeed" style="color:#f0c040">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">Speed Formula</div>
+      <div class="panel-body">
+        <div class="ctrl">
+          <label>Min speed (100%) <span class="val-display" id="minDisplay">${DEFAULTS.minSpeed}×</span></label>
+          <input type="range" min="0.5" max="5" step="0.1" value="${DEFAULTS.minSpeed}" oninput="onParam('minSpeed',+this.value,'minDisplay','×')"/>
+        </div>
+        <div class="ctrl">
+          <label>Max speed (0%) <span class="val-display" id="maxDisplay">${DEFAULTS.maxSpeed}×</span></label>
+          <input type="range" min="2" max="20" step="0.5" value="${DEFAULTS.maxSpeed}" oninput="onParam('maxSpeed',+this.value,'maxDisplay','×')"/>
+        </div>
+        <div class="ctrl">
+          <label>Curve exponent <span class="val-display" id="expDisplay">${DEFAULTS.exp}</span></label>
+          <input type="range" min="0.5" max="3" step="0.1" value="${DEFAULTS.exp}" oninput="onParam('exp',+this.value,'expDisplay','')"/>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">Gate Difficulty</div>
+      <div class="panel-body">
+        <div class="ctrl">
+          <label>Gate % open at 100% batt <span class="val-display" id="gateEasyDisp">${DEFAULTS.gateEasy}%</span></label>
+          <input type="range" min="40" max="99" value="${DEFAULTS.gateEasy}" oninput="onParam('gateEasy',+this.value,'gateEasyDisp','%')"/>
+        </div>
+        <div class="ctrl">
+          <label>Gate % open at 0% batt <span class="val-display" id="gateHardDisp">${DEFAULTS.gateHard}%</span></label>
+          <input type="range" min="5" max="50" value="${DEFAULTS.gateHard}" oninput="onParam('gateHard',+this.value,'gateHardDisp','%')"/>
+        </div>
+        <button class="show-code-btn" id="showCodeBtn" onclick="toggleCode()">Show code changes</button>
+        <button onclick="storeAndLaunchTestGame()">Test Game with Current Settings</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="code-panel" id="codePanel">
+  <div class="code-panel-head">Files to update <button onclick="navigator.clipboard.writeText(document.getElementById('diffContent').innerText)" style="font-size:.65rem;padding:2px 8px;border:1px solid #222;background:transparent;color:#555;cursor:pointer;font-family:monospace">Copy all</button></div>
+  <div id="diffContent"></div>
+</div>
+`)
+
+// ── Formulas ──────────────────────────────────────────────────────────────────
+function calcSpeed(level) {
+  const t = Math.pow(1 - level, p.exp)
+  return p.minSpeed + (p.maxSpeed - p.minSpeed) * t
+}
+function calcGate(level) {
+  return Math.round(p.gateHard + (p.gateEasy - p.gateHard) * level)
+}
+
+// ── Curve canvas ──────────────────────────────────────────────────────────────
+const cv = document.getElementById('curve')
+const cx = cv.getContext('2d')
+const W = 560, H = 240
+const PAD = {l:42, r:12, t:14, b:26}
+const pw = W-PAD.l-PAD.r, ph = H-PAD.t-PAD.b
+const toX = l => PAD.l + (1-l)*pw
+const toY = s => PAD.t + ph - ((s-p.minSpeed)/(p.maxSpeed-p.minSpeed+0.001))*ph
+
+function drawCurve() {
+  cx.fillStyle='#07070f'; cx.fillRect(0,0,W,H)
+  // Grid
+  cx.strokeStyle='#111'; cx.lineWidth=0.5
+  for(let i=0;i<=4;i++){
+    const y=PAD.t+i*(ph/4)
+    cx.beginPath(); cx.moveTo(PAD.l,y); cx.lineTo(PAD.l+pw,y); cx.stroke()
+  }
+  // Axes
+  cx.strokeStyle='#222'; cx.lineWidth=1
+  cx.beginPath(); cx.moveTo(PAD.l,PAD.t); cx.lineTo(PAD.l,PAD.t+ph); cx.lineTo(PAD.l+pw,PAD.t+ph); cx.stroke()
+  // Labels
+  cx.fillStyle='#444'; cx.font='9px monospace'; cx.textAlign='right'
+  cx.fillText(p.maxSpeed.toFixed(1)+'×', PAD.l-3, PAD.t+4)
+  cx.fillText(p.minSpeed.toFixed(1)+'×', PAD.l-3, PAD.t+ph)
+  cx.textAlign='center'
+  cx.fillText('100%', PAD.l,          PAD.t+ph+14)
+  cx.fillText('50%',  PAD.l+pw*0.5,   PAD.t+ph+14)
+  cx.fillText('0%',   PAD.l+pw,       PAD.t+ph+14)
+  // Danger zone
+  cx.fillStyle='rgba(226,75,74,0.06)'
+  cx.fillRect(toX(0.2),PAD.t, toX(0)-toX(0.2), ph)
+  cx.fillStyle='#E24B4A33'; cx.font='8px monospace'; cx.textAlign='left'
+  cx.fillText('critical zone', toX(0.2)+3, PAD.t+10)
+  // Default curve (ghost)
+  cx.strokeStyle='#1a1a2e'; cx.lineWidth=1.5; cx.setLineDash([3,3])
+  cx.beginPath()
+  for(let i=0;i<=100;i++){
+    const l=i/100, s=DEFAULTS.minSpeed+(DEFAULTS.maxSpeed-DEFAULTS.minSpeed)*(1-l)
+    i===0?cx.moveTo(toX(l),toY(s)):cx.lineTo(toX(l),toY(s))
+  }
+  cx.stroke(); cx.setLineDash([])
+  // Active curve
+  cx.strokeStyle='#f0c040'; cx.lineWidth=2
+  cx.beginPath()
+  for(let i=0;i<=100;i++){
+    const l=i/100, s=calcSpeed(l)
+    i===0?cx.moveTo(toX(l),toY(s)):cx.lineTo(toX(l),toY(s))
+  }
+  cx.stroke()
+  // Key point markers
+  [[1.0,'#1D9E75'],[0.5,'#EF9F27'],[0.2,'#E24B4A'],[0.0,'#E24B4A']].forEach(([l,col])=>{
+    const s=calcSpeed(l), x=toX(l), y=toY(s)
+    cx.fillStyle=col; cx.beginPath(); cx.arc(x,y,5,0,Math.PI*2); cx.fill()
+    cx.fillStyle=col; cx.font='9px monospace'; cx.textAlign='center'
+    cx.fillText(s.toFixed(1)+'×',x,y-8)
+  })
+  // Live battery marker
+  if (battery) {
+    const lx=toX(liveLevel), ly=toY(calcSpeed(liveLevel))
+    cx.strokeStyle='#ffffff'; cx.lineWidth=1; cx.setLineDash([2,2])
+    cx.beginPath(); cx.moveTo(lx,PAD.t+ph); cx.lineTo(lx,ly); cx.stroke(); cx.setLineDash([])
+    cx.fillStyle='#fff'; cx.beginPath(); cx.arc(lx,ly,4,0,Math.PI*2); cx.fill()
+    document.getElementById('liveDot').textContent = `● live: ${Math.round(liveLevel*100)}%`
+  }
+}
+
+function updateStats() {
+  [[100,1.0],[50,0.5],[20,0.2],[0,0.0]].forEach(([pct,lvl])=>{
+    document.getElementById('s'+pct).textContent = calcSpeed(lvl).toFixed(2)+'×'
+    document.getElementById('g'+pct).textContent = calcGate(lvl)+'%'
+  })
+  const ls = calcSpeed(liveLevel)
+  document.getElementById('liveLvl').textContent   = Math.round(liveLevel*100)+'%'
+  document.getElementById('liveSpeed').textContent = ls.toFixed(2)+'×'
+  drawCurve()
+  if (codeOpen) buildDiffContent()
+}
+
+// ── Battery ───────────────────────────────────────────────────────────────────
+let drainTimer = null
+async function init(sim=false) {
+  const res = await getBattery(sim)
+  battery   = res.battery
+  simulated = res.simulated
+  liveLevel = battery.level
+  document.getElementById('battModeBadge').innerHTML = simulated
+    ? '<span class="sim-badge">⚙ Simulated</span>'
+    : '<span class="real-badge">✓ Real API</span>'
+  battery.addEventListener('levelchange', () => { liveLevel=battery.level; updateStats() })
+  updateStats()
+}
+window.toggleSim = function() {
+  const on = document.getElementById('simToggle').checked
+  document.getElementById('simCtrls').style.opacity = on?'1':'0.4'
+  document.getElementById('simCtrls').style.pointerEvents = on?'all':'none'
+  init(on)
+}
+window.setSimLevel = function(v) {
+  document.getElementById('simLvlDisp').textContent = v+'%'
+  if (simulated && battery._setLevel) { battery._setLevel(v/100); liveLevel=v/100; updateStats() }
+}
+window.autoDrain = function() {
+  stopDrain()
+  let v = Math.round(liveLevel*100)
+  drainTimer = setInterval(()=>{ v=Math.max(0,v-1); setSimLevel(v); if(v<=0)stopDrain() }, 300)
+}
+window.stopDrain = function() { if(drainTimer){clearInterval(drainTimer);drainTimer=null} }
+
+window.onParam = function(key, val, dispId, suffix) {
+  p[key] = val
+  document.getElementById(dispId).textContent = parseFloat(val).toFixed(1)+suffix
+  updateStats()
+}
+
+// ── Code diff ──────────────────────────────────────────────────────────────────
+window.toggleCode = function() {
+  codeOpen = !codeOpen
+  document.getElementById('codePanel').classList.toggle('open', codeOpen)
+  document.getElementById('showCodeBtn').classList.toggle('open', codeOpen)
+  document.getElementById('showCodeBtn').textContent = codeOpen?'Hide code changes':'Show code changes'
+  if (codeOpen) buildDiffContent()
+}
+function buildDiffContent() {
+  const expNote = p.exp===1?'linear':p.exp<1?'fast early ramp':'aggressive near-empty'
+  const files = [
+    {
+      path: 'src/core/battery.js',
+      note: `Speed formula constants. Exponent ${p.exp.toFixed(1)} = ${expNote}.`,
+      lines: [
+        { type:'ctx',    text:'export function getBatterySpeed(level) {' },
+        { type:'remove', text:`  const MIN_SPEED = ${DEFAULTS.minSpeed.toFixed(1)};` },
+        { type:'add',    text:`  const MIN_SPEED = ${p.minSpeed.toFixed(1)};` },
+        { type:'remove', text:`  const MAX_SPEED = ${DEFAULTS.maxSpeed.toFixed(1)};` },
+        { type:'add',    text:`  const MAX_SPEED = ${p.maxSpeed.toFixed(1)};` },
+        { type:'remove', text:`  return MIN_SPEED + (MAX_SPEED - MIN_SPEED) * (1.0 - level);` },
+        { type:'add',    text:`  const t = Math.pow(1 - level, ${p.exp.toFixed(1)}); // ${expNote}` },
+        { type:'add',    text:`  return MIN_SPEED + (MAX_SPEED - MIN_SPEED) * t;` },
+        { type:'ctx',    text:'}' },
+      ]
+    },
+    {
+      path: 'src/systems/obstacle-manager.js',
+      note: `Gate opening width. Full charge: ${p.gateEasy}% open (slow but easy). Dead: ${p.gateHard}% open (fast but narrow).`,
+      lines: [
+        { type:'ctx',    text:'function getGateOpenPercent(level) {' },
+        { type:'remove', text:`  const GATE_EASY = ${DEFAULTS.gateEasy};` },
+        { type:'add',    text:`  const GATE_EASY = ${p.gateEasy};` },
+        { type:'remove', text:`  const GATE_HARD = ${DEFAULTS.gateHard};` },
+        { type:'add',    text:`  const GATE_HARD = ${p.gateHard};` },
+        { type:'ctx',    text:`  return GATE_HARD + (GATE_EASY - GATE_HARD) * level;` },
+        { type:'ctx',    text:'}' },
+      ]
+    }
+  ]
+  renderDiff(document.getElementById('diffContent'), files)
+}
+
+// Store test settings and launch test game
+window.storeAndLaunchTestGame = () => {
+  // Store velocity/battery constants
+  sessionStorage.setItem('testMinSpeed', p.minSpeed);
+  sessionStorage.setItem('testMaxSpeed', p.maxSpeed);
+  sessionStorage.setItem('testExp', p.exp);
+  sessionStorage.setItem('testGateEasy', p.gateEasy);
+  sessionStorage.setItem('testGateHard', p.gateHard);
+  // Store current simulated battery level if using simulator
+  if (document.getElementById('simToggle').checked) {
+    const simLevel = parseFloat(document.getElementById('simLvlDisp').textContent) / 100;
+    sessionStorage.setItem('testBatteryLevel', simLevel);
+    sessionStorage.setItem('testCharging', false); // Default
+  }
+  window.location.href = '/tests/test-game.html';
+}
+</script>
+</body>
+</html>

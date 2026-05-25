@@ -1,0 +1,61 @@
+/* ── Reset ───────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Body: full black viewport, nothing overflows ────────── */
+body {
+  background: #000;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Canvas: CSS scales it to fill screen.
+   Internal resolution stays 640×360 (set in main.js).
+   pixelated keeps the GBA pixel-art look crisp. ─────────── */
+#game {
+  width: 100vw;
+  height: 100vh;
+  object-fit: contain;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges; /* Safari fallback */
+  display: block;
+}
+
+/* ── Unsupported screen: hidden by default ───────────────── */
+#screen-unsupported {
+  display: none;           /* battery.js sets this to flex */
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  z-index: 999;
+}
+
+.unsupported-box {
+  text-align: center;
+  padding: 2rem;
+  border: 1px solid #f0c040;
+}
+
+.unsupported-title {
+  font-family: monospace;
+  font-size: 1.4rem;
+  color: #f0c040;
+  margin-bottom: 1rem;
+  letter-spacing: 0.1em;
+}
+
+.unsupported-body {
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: #888;
+  line-height: 1.8;
+}
