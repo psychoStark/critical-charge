@@ -336,6 +336,17 @@ function update(dt) {
   }
   inputState.jumpTriggered = false;
 
+  // ── TILT CONTROLS ──
+  // Translate tiltX into lane movement. When tilt exceeds threshold, change lane. When steady, always reset to middle lane (0).
+  const TILT_LANE_THRESHOLD = 0.2; // Sensitivity threshold for lane changes.
+  if (Math.abs(inputState.tiltX) > TILT_LANE_THRESHOLD) {
+    // Tilt overrides lane direction regardless of previous swipe.
+    inputState.lane = inputState.tiltX > 0 ? 1 : -1;
+  } else {
+    // When device is steady, keep player in middle lane.
+    inputState.lane = 0;
+  }
+
   if (playerJumpHeight >= 0) {
     playerJumpHeight += playerJumpVelocity * dt;
     playerJumpVelocity += GRAVITY * dt;

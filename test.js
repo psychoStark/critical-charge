@@ -1,9 +1,9 @@
-// test-quick.js
-// Quick test module that runs the game using all the same parameters from the
+// test.js
+// Test module that runs the game using all the same parameters from the
 // original game code, but bypasses the Battery Status API entirely.
 // The battery level is configurable via the CONFIG object below.
 //
-// Usage: Open test-quick.html in a browser (any browser — no Battery API needed).
+// Usage: Open test.html in a browser (any browser — no Battery API needed).
 
 import { initBattery, setBatteryConfig, MIN_SPEED, MAX_SPEED, SPEED_EXPONENT } from './src/core/battery.js';
 import { startEngine, setEngineConfig, setSpawnRate, JUMP_FORCE, GRAVITY, SPAWN_RATE } from './src/core/engine.js';
@@ -20,8 +20,8 @@ const CONFIG = {
   batteryLevel: 0.5, // Change this to test different levels (e.g., 0.5 for 50% battery)
 
   // Battery speed curve parameters (uses defaults from battery.js if not overridden)
-  minSpeed: MIN_SPEED,   // Speed multiplier at 100% battery
-  maxSpeed: MAX_SPEED,   // Speed multiplier at 0% battery
+  minSpeed: MIN_SPEED, // Speed multiplier at 100% battery
+  maxSpeed: MAX_SPEED, // Speed multiplier at 0% battery
   speedExponent: SPEED_EXPONENT, // Curve exponent (1.0 = linear)
 
   // Engine physics overrides (uses defaults from engine.js if not overridden)
@@ -100,7 +100,7 @@ async function boot() {
   startEngine(canvas);
 
   console.log(
-    `[test-quick] Game running with simulated battery level: ${CONFIG.batteryLevel}`
+    `[test] Game running with simulated battery level: ${CONFIG.batteryLevel}`
   );
 }
 

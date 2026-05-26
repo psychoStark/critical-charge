@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Critical Charge — Test</title>
+<link rel="stylesheet" href="/src/style.css" />
+<style>
+  /* Add any specific styles for the test game page here */
+  #test-controls {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 10px;
+    border-radius: 5px;
+    font-family: monospace;
+    z-index: 1000;
+  }
+  #test-controls button {
+    background: #f0c040;
+    color: #000;
+    border: none;
+    padding: 5px 10px;
+    margin-top: 5px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<!-- SCREEN: shown permanently if Battery API is unavailable -->
+<div id="screen-unsupported">
+  <div class="unsupported-box">
+    <p class="unsupported-title">⚡ HARDWARE UNSUPPORTED</p>
+    <p class="unsupported-body">
+      This device does not support the Battery Status API.<br/>
+      Critical Charge requires a Chromium-based browser<br/>
+      on Android, Windows, or macOS.
+    </p>
+  </div>
+</div>
+
+<!-- THE GAME CANVAS — fixed internal resolution, CSS scales it -->
+<canvas id="game"></canvas>
+
+<script type="module" src="/test.js"></script>
+</body>
+</html>
