@@ -1,5 +1,6 @@
 // src/core/input.js
 import { startEngine, togglePause, loadSavedGame } from './engine.js';
+import { loadSettings, saveSettings } from '../systems/settings.js';
 
 export const inputState = {
   lane: 0,
@@ -9,28 +10,91 @@ export const inputState = {
 };
 
 // Input constants - module-level so they can be modified by test pages
-export let SWIPE_THRESHOLD = 30; // Reduced threshold for more responsive swipe detection.
-export let TILT_SENSITIVITY = 0.03; // How strongly device tilt affects player movement. Higher values make tilt more responsive.
-export let DEADZONE = 0.05; // The range around the center where device tilt is ignored, preventing accidental small movements.
+let SWIPE_THRESHOLD = 30; // Reduced threshold for more responsive swipe detection.
+let TILT_SENSITIVITY = 0.03; // How strongly device tilt affects player movement. Higher values make tilt more responsive.
+let DEADZONE = 0.05; // The range around the center where device tilt is ignored, preventing accidental small movements.
+
+// Current control method
+let currentControlMethod = 'swipe';
 
 export function setInputConfig(config) {
   if (config.swipeThreshold !== undefined) SWIPE_THRESHOLD = config.swipeThreshold;
   if (config.tiltSensitivity !== undefined) TILT_SENSITIVITY = config.tiltSensitivity;
   if (config.deadzone !== undefined) DEADZONE = config.deadzone;
+  if (config.controlMethod !== undefined) currentControlMethod = config.controlMethod;
+}
+
+/**
+ * Check if device has tilt sensor capability
+ * @returns {Promise<boolean>} True if device has tilt sensor
+ */
+export async function checkTiltSensor() {
+  if (window.DeviceOrientationEvent) {
+    // Test if device actually provides tilt data
+    return new Promise((resolve) => {
+      const testListener = (e) => {
+        if (e.gamma !== null) {
+          window.removeEventListener('deviceorientation', testListener);
+          resolve(true);
+        }
+      };
+      
+      window.addEventListener('deviceorientation', testListener, { once: true });
+      
+      // Timeout in case no events are received
+      setTimeout(() => {
+        window.removeEventListener('deviceorientation', testListener);
+        resolve(false);
+      }, 1000);
+    });
+  }
+  return false;
+}
+
+/**
+ * Get the current control method
+ * @returns {string} Current control method ('swipe' or 'tilt')
+ */
+export function getControlMethod() {
+  return currentControlMethod;
+}
+
+/**
+ * Set the control method
+ * @param {string} method - 'swipe' or 'tilt'
+ */
+export function setControlMethod(method) {
+  if (method === 'swipe' || method === 'tilt') {
+    currentControlMethod = method;
+    const settings = loadSettings();
+    settings.controlMethod = method;
+    saveSettings(settings);
+  }
 }
 
 export function initInput() {
+  // Load settings
+  const settings = loadSettings();
+  currentControlMethod = settings.controlMethod;
+  SWIPE_THRESHOLD = settings.swipeThreshold;
+  TILT_SENSITIVITY = settings.tiltSensitivity;
+  DEADZONE = settings.deadzone;
+
   // 1. KEYBOARD
   window.addEventListener('keydown', (e) => {
     console.log('Keydown event:', e.key, e.code);
-    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
-      inputState.lane = Math.max(-1, inputState.lane - 1);
-      console.log('Lane left ->', inputState.lane);
+    // Keyboard lane controls only work in swipe mode
+    if (currentControlMethod === 'swipe') {
+      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+        inputState.lane = Math.max(-1, inputState.lane - 1);
+        console.log('Lane left ->', inputState.lane);
+      }
+      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+        inputState.lane = Math.min(1, inputState.lane + 1);
+        console.log('Lane right ->', inputState.lane);
+      }
     }
-    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
-      inputState.lane = Math.min(1, inputState.lane + 1);
-      console.log('Lane right ->', inputState.lane);
-    }
+    // Jump always works
     if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
       inputState.jumpTriggered = true;
       console.log('Jump triggered');
@@ -53,6 +117,7 @@ export function initInput() {
     if (e.key === 'l' || e.key === 'L') {
       loadSavedGame();
       console.log('Load saved game');
+      console.log('InputState after keydown:', inputState);
     }
   });
 
@@ -69,15 +134,22 @@ export function initInput() {
     let dx = e.changedTouches[0].clientX - touchStartX;
     let dy = e.changedTouches[0].clientY - touchStartY;
 
+    // ── SWIPE UP TO JUMP: Always enabled regardless of control mode ──
     if (Math.abs(dy) > Math.abs(dx) && dy < -SWIPE_THRESHOLD) {
       inputState.jumpTriggered = true;
-    } else if (dx > SWIPE_THRESHOLD) {
-      inputState.lane = Math.min(1, inputState.lane + 1);
-    } else if (dx < -SWIPE_THRESHOLD) {
-      inputState.lane = Math.max(-1, inputState.lane - 1);
     }
+    
+    // ── SWIPE LEFT/RIGHT FOR LANE CHANGE: Only in swipe mode ──
+    if (currentControlMethod === 'swipe') {
+      if (dx > SWIPE_THRESHOLD) {
+        inputState.lane = Math.min(1, inputState.lane + 1);
+      } else if (dx < -SWIPE_THRESHOLD) {
+        inputState.lane = Math.max(-1, inputState.lane - 1);
+      }
+    }
+    
     // ── MOBILE TAP BEHAVIORS ──
-    else if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
 
       // Define the Pause Button Zone: The top 15% of the screen
       const isPauseZone = touchStartY < window.innerHeight * 0.15;
@@ -113,9 +185,12 @@ export function initInput() {
   window.addEventListener('mouseup', e => {
     if (!mouseDown) return;
     mouseDown = false;
-    let dx = e.clientX - mouseStartX;
-    if (Math.abs(dx) > SWIPE_THRESHOLD) {
-      inputState.lane = Math.max(-1, Math.min(1, inputState.lane + (dx > 0 ? 1 : -1)));
+    // Only process mouse swipe lane changes in swipe mode
+    if (currentControlMethod === 'swipe') {
+      let dx = e.clientX - mouseStartX;
+      if (Math.abs(dx) > SWIPE_THRESHOLD) {
+        inputState.lane = Math.max(-1, Math.min(1, inputState.lane + (dx > 0 ? 1 : -1)));
+      }
     }
   });
 }
