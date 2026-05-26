@@ -124,7 +124,7 @@ let isGameOver = false;
 let isPaused = false;
 
 // Button states for pause and game over screens
-let pauseButtonState = { resume: false, load: false };
+let pauseButtonState = { resume: false, load: false, save: false };
 let gameOverButtonState = { restart: false, load: false };
 
 /**
@@ -185,14 +185,21 @@ function handleCanvasClick(event) {
 
   // Pause screen buttons are centered vertically at canvasHeight/2
   const pauseStartX = canvasWidth / 2 - buttonWidth / 2;
-  const pauseStartY = canvasHeight / 2;
+  let pauseStartY = canvasHeight / 2 - buttonHeight - buttonSpacing / 2; // Adjusted to make space for save button above resume
 
   // Game over screen buttons start a bit lower
   const overStartX = canvasWidth / 2 - buttonWidth / 2;
   const overStartY = canvasHeight / 2 + 20;
 
   if (isPaused) {
+    // Save button
+    if (x >= pauseStartX && x <= pauseStartX + buttonWidth &&
+        y >= pauseStartY && y <= pauseStartY + buttonHeight) {
+      saveGame();
+      return;
+    }
     // Resume button
+    pauseStartY = canvasHeight / 2; // Reset for resume and load button
     if (x >= pauseStartX && x <= pauseStartX + buttonWidth &&
         y >= pauseStartY && y <= pauseStartY + buttonHeight) {
       togglePause();
@@ -227,20 +234,24 @@ function handleCanvasClick(event) {
 
 /**
  * Toggles the running clock of the loop.
- * Triggers an automatic save when pausing.
  */
 export function togglePause() {
   if (isGameOver) return; // Can't pause if dead
   
   isPaused = !isPaused;
-  if (isPaused) {
-    // If the player pauses, execute a manual save of current progress instantly!
-    saveGameData(score, trackPosition, obstacles);
-  } else {
+  if (!isPaused) {
     // Unpausing requires correcting lastTime so game objects don't jump gaps
     lastTime = performance.now();
     requestAnimationFrame(gameLoop);
   }
+}
+
+/**
+ * Manually saves the current game state.
+ */
+export function saveGame() {
+  saveGameData(score, trackPosition, obstacles);
+  console.log("Game state saved manually.");
 }
 
 /**
@@ -504,15 +515,28 @@ function renderPauseScreen() {
 
   ctx.fillStyle = 'white';
   ctx.font = '20px monospace';
-  ctx.fillText('Game Auto-Saved to Storage', canvasWidth / 2, canvasHeight / 2 - 60);
+  ctx.fillText('Save or Load Game', canvasWidth / 2, canvasHeight / 2 - 60);
   
   // Draw buttons
   const buttonWidth = 200;
   const buttonHeight = 50;
   const buttonSpacing = 20;
   const startX = canvasWidth / 2 - buttonWidth / 2;
-  const startY = canvasHeight / 2;
+  let startY = canvasHeight / 2 - buttonHeight - buttonSpacing / 2; // Adjusted to make space for save button above resume
   
+  // Save Button
+  ctx.fillStyle = pauseButtonState.save ? '#f0c040' : '#1a1a2e';
+  ctx.strokeStyle = '#f0c040';
+  ctx.lineWidth = 2;
+  ctx.fillRect(startX, startY, buttonWidth, buttonHeight);
+  ctx.strokeRect(startX, startY, buttonWidth, buttonHeight);
+  ctx.fillStyle = '#000';
+  ctx.font = '20px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('SAVE GAME', canvasWidth / 2, startY + buttonHeight / 2 + 10);
+
+  startY = canvasHeight / 2; // Reset startY for Resume and Load buttons
+
   // Resume Button
   ctx.fillStyle = pauseButtonState.resume ? '#f0c040' : '#1a1a2e';
   ctx.strokeStyle = '#f0c040';
