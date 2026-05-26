@@ -22,3 +22,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+
+#unused files
+hero.png
+8-Bit-Character.svg
+car-in.svg
+cargo.svg
+Cartop.svg
+hud-battery.svg
+obstacle-barrier.svg
+bstacle-gate.svg
+player.svg

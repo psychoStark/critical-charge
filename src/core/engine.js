@@ -33,10 +33,10 @@ let canvasWidth;
 let canvasHeight;
 
 // Renderer configuration - export these so they can be modified by test pages
-export let SCROLL_SPEED = 3.0;
-export let CAMERA_X_OFFSET = 0;
-export let HORIZON_Y = 0; // Will be set to canvasHeight / 2 - 200 in startEngine
-export let TRACK_HALF_WIDTH = 200;
+export let SCROLL_SPEED = 3.0; // Adjusts how fast the game world scrolls past the player. Higher values mean faster scrolling.
+export let CAMERA_X_OFFSET = 0; // Shifts the camera left or right. Positive values move the camera right.
+export let HORIZON_Y = 0; // Determines the vertical position of the horizon line. Changes where the distant road appears. // Will be set to canvasHeight / 2 - 200 in startEngine
+export let TRACK_HALF_WIDTH = 200; // Sets half the width of the playable road area. Affects how wide the lanes are.
 
 /**
  * Current position along the infinite track/road.
@@ -67,7 +67,7 @@ let obstacles = [];
  * @type {number}
  */
 export let spawnTimer = 0;
-export let SPAWN_RATE = 1.5;
+export let SPAWN_RATE = 1.5; // Controls how frequently new obstacles appear. Lower values mean more frequent obstacles.
 
 /**
  * Visual X position of the player for smooth animation.
@@ -75,6 +75,7 @@ export let SPAWN_RATE = 1.5;
  * @type {number}
  */
 let playerVisualX = 0;
+let playerVisualZ = 0.75; // 0.0 is horizon, 1.0 is bottom of screen
 
 /**
  * Current jump height of the player in pixels.
@@ -97,14 +98,14 @@ let playerJumpVelocity = 0;
  * Higher absolute values create stronger gravity and shorter jumps.
  * @type {number}
  */
-export let GRAVITY = -2500;
+export let GRAVITY = -3500; // Adjusts the strength of gravity affecting the player's jumps. More negative means stronger gravity.
 
 /**
  * Initial upward force applied when the player jumps.
  * Higher values create higher, longer jumps.
  * @type {number}
  */
-export let JUMP_FORCE = 800;
+export let JUMP_FORCE = 1200; // Determines how high the player jumps. Higher values result in higher jumps.
 
 /**
  * Player's current score, based on distance traveled.
@@ -138,6 +139,7 @@ export function startEngine(canvasParam) {
   // Save the canvas reference for later use (e.g., click handling)
   canvas = canvasParam;
   ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
   console.log('Engine started with canvas', canvas.width, canvas.height);
   
   // Store canvas dimensions for use in rendering calculations
@@ -325,7 +327,7 @@ function update(dt) {
   const level = getBatteryLevel();
   const speed = getBatterySpeed(level);
 
-  trackPosition += speed * dt * 300;
+  trackPosition += speed * dt * 50;
   score += speed * dt * 10;
 
   // ── JUMP PHYSICS ──
@@ -348,7 +350,7 @@ function update(dt) {
   spawnTimer += dt * speed;
   if (spawnTimer > SPAWN_RATE) {
     obstacles.push({
-      z: 1.0,
+      z: 5.0,
       lane: Math.floor(Math.random() * 3) - 1,
       type: 'barricade'
     });
@@ -360,7 +362,7 @@ function update(dt) {
     obstacles[i].z -= dt * speed * 0.4; 
     
     // The player is actually standing at Z = 0.14 based on the 1280px screen height.
-    if (obstacles[i].z < 0.14 && obstacles[i].z > 0.10) {
+    if (obstacles[i].z < 0.08 && obstacles[i].z > 0.02) {
       if (obstacles[i].lane === inputState.lane) {
         // If your jump height isn't over 50, you crash!
         if (playerJumpHeight < 50) {
@@ -381,17 +383,19 @@ function render() {
   ctx.fillStyle = '#050510';
   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
+// ROAD RENDERING
+
   const horizonY = HORIZON_Y;
 
   ctx.fillStyle = '#8000ff';
   ctx.fillRect(0, horizonY - 1, canvasWidth, 2);
 
-  const step = 3;
+  const step = 3; // Controls the vertical spacing between road segments. Smaller values make the road appear smoother.
 
   for (let y = horizonY; y < canvasHeight; y += step) {
     const distance = 100 / (y - horizonY + 1);
-    const scale = 1 / distance;
-    const roadWidth = 60 + (250 * scale);
+    const scale = 1.5 / distance;
+    const roadWidth = 20 + (125 * scale);
     const textureY = distance * 200 + trackPosition * SCROLL_SPEED;
 
     const isDark = Math.floor(textureY / 40) % 2 === 0;
@@ -410,49 +414,77 @@ function render() {
   obstacles.sort((a, b) => b.z - a.z);
 
   for (const obs of obstacles) {
-    if (obs.z > 1.0 || obs.z < 0.02) continue;
+    if (obs.z > 2.0 || obs.z < 0.05) continue; // Only render obstacles within a certain Z-depth range (visible on screen).
 
-    const visualZ = Math.max(obs.z, 0.02);
-    const scale = 1 / visualZ;
+    const visualZ = Math.max(obs.z, 0.05); // Ensures obstacles don't get too close to the camera, preventing visual glitches.
+    const scale = 1 / (visualZ / 0.5); // Calculates the size of the obstacle based on its distance (Z-depth). Further objects are smaller.
 
-    const baseW = 25;
-    const baseH = 25;
+    // Use 120px as the base size to match your sprite sheet resolution
+    const baseW = 50; // Base width of obstacles in pixels before scaling.
+    const baseH = 50; // Base height of obstacles in pixels before scaling.
     const w = baseW * scale;
     const h = baseH * scale;
 
-    const laneOffsetTop = obs.lane * 50;
-    const laneOffsetGrows = obs.lane * 7;
-    const screenX = (canvasWidth / 2 + CAMERA_X_OFFSET) + laneOffsetTop + (laneOffsetGrows * scale);
+    // Define the base width of your lanes at "scale 1.0" (near the player)
+    const laneWidthAtPlayer = 20; // Adjust this to control how wide the lanes are at the player's position.
+    
+    // Calculate screenX by multiplying lane position by the current scale.
+    // As scale approaches 0 (at the horizon), screenX approaches (canvasWidth / 2 + CAMERA_X_OFFSET).
+    const screenX = (canvasWidth / 2 + CAMERA_X_OFFSET) + (obs.lane * laneWidthAtPlayer * scale);
+    
     const screenY = horizonY + (100 * scale);
 
-    const asset = assetCache[obs.type];
+    const asset = assetCache[obs.type]; // This is now your obstacle PNG
     if (asset) {
-      ctx.drawImage(asset, screenX - w/2, screenY - h, w, h);
+      // Animate: cycle through 5 frames (0-4)
+      const frameIndex = Math.floor(Date.now() / 150) % 5; // Current animation frame for obstacles (0-4).
+      const FRAME_SIZE = 120; // Size of each frame in the obstacle sprite sheet.
+
+      ctx.drawImage(
+        asset,
+        frameIndex * FRAME_SIZE, 0, FRAME_SIZE, FRAME_SIZE, // Source (Cropping)
+        screenX - w/2, screenY - h, w, h // Dest (Scaled)
+      );
     }
   }
   
-  // ── PLAYER RENDER LOGIC WITH JUMPING ──
+    // ── PLAYER RENDER LOGIC WITH Z-DEPTH ──
   const laneWidth = TRACK_HALF_WIDTH * 0.9;
   const targetX = inputState.lane * laneWidth;
-
   playerVisualX += (targetX - playerVisualX) * 0.25;
 
   const playerAsset = assetCache['player'];
   if (playerAsset) {
-    const pw = 120;
-    const ph = 120;
+    const FRAME_SIZE = 120; // Original frame size
+    
+    // 1. Calculate animation speed/frame
+    const level = getBatteryLevel();
+    const speed = getBatterySpeed(level);
+    const animationSpeed = Math.max(50, 150 / (speed * 0.5));
+    const frameIndex = Math.floor(Date.now() / animationSpeed) % 5;
 
-    const pScreenX = (canvasWidth / 2 + CAMERA_X_OFFSET) + playerVisualX;
-    const pScreenY = canvasHeight - ph - 100 - playerJumpHeight;
+    // 2. Perspective Math: Player grows as they move toward playerVisualZ 1.0
+    const scale = 0.5 + (playerVisualZ * 0.5); // Adjust this to make base player size bigger/smaller
+    const drawSize = 250 * scale; 
 
+    // 3. Position math: Linked to horizon and Z-depth
+    const pScreenX = (canvasWidth / 2 + CAMERA_X_OFFSET) + (playerVisualX * scale);
+    const pScreenY = horizonY + ((canvasHeight - horizonY) * playerVisualZ) - (drawSize / 2) - playerJumpHeight;
+
+    // Optional: Draw jump shadow
     if (playerJumpHeight > 0) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
       ctx.beginPath();
-      ctx.ellipse(pScreenX, canvasHeight - 25, 18, 7, 0, 0, Math.PI * 2);
+      ctx.ellipse(pScreenX, horizonY + ((canvasHeight - horizonY) * playerVisualZ) + (drawSize/2), 18 * scale, 7 * scale, 0, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    ctx.drawImage(playerAsset, pScreenX - (pw / 2), pScreenY, pw, ph);
+    // 4. Draw the cropped frame
+    ctx.drawImage(
+      playerAsset, 
+      frameIndex * FRAME_SIZE, 0, FRAME_SIZE, FRAME_SIZE,
+      pScreenX - (250 / 2), pScreenY, 250, 250
+    );
   }
   
   // Draw the HUD

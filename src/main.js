@@ -7,8 +7,8 @@ import { initInput } from './core/input.js';
 const canvas = document.getElementById('game');
 
 // Internal resolution. (720x1280 is a portrait ratio, typical for mobile runners!)
-canvas.width  = 720;
-canvas.height = 1280;
+canvas.width  = 720; // Sets the width of the game canvas in pixels.
+canvas.height = 1280; // Sets the height of the game canvas in pixels.
 
 async function boot() {
   const battery = await initBattery();

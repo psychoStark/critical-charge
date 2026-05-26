@@ -9,9 +9,9 @@ export const inputState = {
 };
 
 // Input constants - module-level so they can be modified by test pages
-export let SWIPE_THRESHOLD = 50;
-export let TILT_SENSITIVITY = 0.03;
-export let DEADZONE = 0.05;
+export let SWIPE_THRESHOLD = 50; // The minimum distance a touch swipe must cover to register as a game input.
+export let TILT_SENSITIVITY = 0.03; // How strongly device tilt affects player movement. Higher values make tilt more responsive.
+export let DEADZONE = 0.05; // The range around the center where device tilt is ignored, preventing accidental small movements.
 
 export function setInputConfig(config) {
   if (config.swipeThreshold !== undefined) SWIPE_THRESHOLD = config.swipeThreshold;

@@ -17,7 +17,7 @@ import { initInput } from './src/core/input.js';
 const CONFIG = {
   // Simulated battery level: 0.0 (empty) → 1.0 (full)
   // Lower battery = faster game speed (the core mechanic).
-  batteryLevel: 0.9,
+  batteryLevel: 0.5, // Change this to test different levels (e.g., 0.5 for 50% battery)
 
   // Battery speed curve parameters (uses defaults from battery.js if not overridden)
   minSpeed: MIN_SPEED,   // Speed multiplier at 100% battery

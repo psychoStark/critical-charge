@@ -15,14 +15,14 @@ export const assetCache = {};
  * This asset is used for rendering obstacles that the player must avoid.
  * @type {string}
  */
-const BARRICADE_SVG = '/src/assets/svg/car-in.svg'
+const BARRICADE_SPRITE_SHEET = '/src/assets/enemycharger_dynamicgrid.png';
 
 /***
  * Path to the player character SVG asset.
  * This asset represents the player's ship/vehicle in the game.
  * @type {string}
  */
-const PLAYER_SVG = '/src/assets/svg/8-Bit-Character.svg'
+const PLAYER_SPRITE_SHEET = '/src/assets/herosprite_dynamicgrid.png';
 
 /***
  * List of assets to preload for the game.
@@ -32,15 +32,13 @@ const PLAYER_SVG = '/src/assets/svg/8-Bit-Character.svg'
 const assetList = [
   {
     id: 'barricade',
-    src: BARRICADE_SVG,
-    width: 100,  // Width for rasterization
-    height: 100  // Height for rasterization
+    src: BARRICADE_SPRITE_SHEET,
+    type: 'png'
   },
   {
     id: 'player',
-    src: PLAYER_SVG,
-    width: 80,   // Width for rasterization
-    height: 80   // Height for rasterization
+    src: PLAYER_SPRITE_SHEET,
+    type: 'png'
   }
 ];
 
@@ -52,41 +50,35 @@ const assetList = [
  * @returns {Promise<void>} Promise that resolves when all assets are loaded and cached
  */
 export async function preloadAssets() {
-  // Create a promise for each asset to handle asynchronous loading
   const promises = assetList.map(asset => {
-    return new Promise((resolve, reject) => {
-      // Create an image element to load the SVG
+    return new Promise((resolve) => {
       const img = new Image();
       
-      // Set up load handler for successful loading
       img.onload = () => {
-        // Create an offscreen canvas to rasterize the SVG
-        const offscreen = document.createElement('canvas');
-        offscreen.width = asset.width;   // Set canvas width
-        offscreen.height = asset.height; // Set canvas height
-        const ctx = offscreen.getContext('2d'); // Get 2D rendering context
-
-        // Draw the SVG image onto the canvas at the specified dimensions
-        ctx.drawImage(img, 0, 0, asset.width, asset.height);
-        
-        // Store the canvas element in the asset cache using the asset ID
-        assetCache[asset.id] = offscreen;
-        resolve(); // Resolve the promise for this asset
-      };
-      
-      // Set up error handler for failed loading – resolve to continue loading other assets
-      img.onerror = (e) => {
-        console.error('Failed to load asset', asset.id, asset.src, e);
-        // Resolve instead of reject so a single bad asset doesn't abort all loading
+        if (asset.type === 'svg') {
+          // Keep your existing rasterization logic for SVGs
+          const offscreen = document.createElement('canvas');
+          offscreen.width = asset.width;
+          offscreen.height = asset.height;
+          const ctx = offscreen.getContext('2d');
+          ctx.drawImage(img, 0, 0, asset.width, asset.height);
+          assetCache[asset.id] = offscreen;
+        } else {
+          // Just store the raw image object for the Sprite Sheet
+          assetCache[asset.id] = img;
+        }
         resolve();
       };
       
-      // Start loading the SVG image
+      img.onerror = () => {
+        console.error('Failed to load:', asset.src);
+        resolve();
+      };
+      
       img.src = asset.src;
     });
   });
 
-  // Wait for all asset loading promises to settle (either fulfilled or resolved after error)
   await Promise.allSettled(promises);
-  console.log('✅ Assets cached (some may have failed, see errors above).');
+  console.log('✅ Assets cached.');
 }
