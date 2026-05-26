@@ -8,10 +8,10 @@ export default defineConfig({
   },
     rollupOptions: {
       input: {
-        main:      'index.html',
-        tests:     'tests/index.html',
-    }
-  },
+        main: 'index.html',
+        test: 'test.html',
+      }
+    },
   server: {
     open: true,
   },
