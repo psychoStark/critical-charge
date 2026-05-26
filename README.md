@@ -2,7 +2,7 @@
 
 Welcome to **Critical Charge** - a high-speed endless runner game where your device's battery level determines your speed! The lower your battery, the faster you go, creating a thrilling challenge that gets harder as you play.
 
-![Critical Charge Game](public/favicon.svg)
+![Critical Charge Game](public/favicon.png)
 
 ## 🎮 How to Play
 
