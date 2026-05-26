@@ -16,7 +16,7 @@ let batteryRef = null;
  * At full charge, the player moves at the slowest pace, making the game easier.
  * @type {number}
  */
-export let MIN_SPEED = 1.0;
+export let MIN_SPEED = 0.8; // The slowest the player will move when the battery is full (100%).
 
 /**
  * Maximum speed multiplier when battery is depleted (0%).
@@ -24,13 +24,13 @@ export let MIN_SPEED = 1.0;
  * This creates urgency as the battery drains!
  * @type {number}
  */
-export let MAX_SPEED = 8.0;
+export let MAX_SPEED = 4.0; // The fastest the player will move when the battery is empty (0%).
 
 /**
  * Curve exponent for battery speed calculation.
  * @type {number}
  */
-export let SPEED_EXPONENT = 1.0;
+export let SPEED_EXPONENT = 1.0; // Adjusts how quickly speed changes as the battery drains. Higher values make speed increase more rapidly.
 
 /**
  * Sets battery configuration for testing purposes.
