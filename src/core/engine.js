@@ -5,8 +5,9 @@
 
 import { getBatteryLevel, getBatterySpeed } from './battery.js';
 import { assetCache } from '../systems/asset-cache.js';
-import { inputState } from './input.js';
+import { inputState, getControlMethod, checkTiltSensor, setControlMethod } from './input.js';
 import { getHighScore, checkAndSaveHighScore, saveGameData, loadSavedGameData } from '../systems/save-system.js';
+import { loadSettings } from '../systems/settings.js';
 
 /**
  * 2D rendering context for the game canvas.
@@ -125,7 +126,7 @@ let isGameOver = false;
 let isPaused = false;
 
 // Button states for pause and game over screens
-let pauseButtonState = { resume: false, load: false, save: false };
+let pauseButtonState = { resume: false, load: false, save: false, controls: false };
 let gameOverButtonState = { restart: false, load: false };
 
 /**
@@ -187,7 +188,7 @@ function handleCanvasClick(event) {
 
   // Pause screen buttons are centered vertically at canvasHeight/2
   const pauseStartX = canvasWidth / 2 - buttonWidth / 2;
-  let pauseStartY = canvasHeight / 2 - buttonHeight - buttonSpacing / 2; // Adjusted to make space for save button above resume
+  let pauseStartY = canvasHeight / 2 - buttonHeight - buttonSpacing; // Start higher to fit all buttons
 
   // Game over screen buttons start a bit lower
   const overStartX = canvasWidth / 2 - buttonWidth / 2;
@@ -200,17 +201,32 @@ function handleCanvasClick(event) {
       saveGame();
       return;
     }
+    
     // Resume button
-    pauseStartY = canvasHeight / 2; // Reset for resume and load button
+    pauseStartY += buttonHeight + buttonSpacing;
     if (x >= pauseStartX && x <= pauseStartX + buttonWidth &&
         y >= pauseStartY && y <= pauseStartY + buttonHeight) {
       togglePause();
       return;
     }
+    
+    // Controls button (only if tilt sensor detected)
+    pauseStartY += buttonHeight + buttonSpacing;
+    const settings = loadSettings();
+    if (settings.hasTiltSensor) {
+      if (x >= pauseStartX && x <= pauseStartX + buttonWidth &&
+          y >= pauseStartY && y <= pauseStartY + buttonHeight) {
+        // Toggle between swipe and tilt controls
+        const newMethod = settings.controlMethod === 'swipe' ? 'tilt' : 'swipe';
+        setControlMethod(newMethod);
+        return;
+      }
+    }
+    
     // Load button
+    pauseStartY += buttonHeight + buttonSpacing;
     if (x >= pauseStartX && x <= pauseStartX + buttonWidth &&
-        y >= pauseStartY + buttonHeight + buttonSpacing &&
-        y <= pauseStartY + buttonHeight + buttonSpacing + buttonHeight) {
+        y >= pauseStartY && y <= pauseStartY + buttonHeight) {
       loadSavedGame();
       return;
     }
@@ -323,72 +339,83 @@ export function setSpawnRate(rate) {
 }
 
 function update(dt) {
-  // Get current battery level and calculate game speed based on it
-  const level = getBatteryLevel();
-  const speed = getBatterySpeed(level);
+    // Get current battery level and calculate game speed based on it
+    const level = getBatteryLevel();
+    const speed = getBatterySpeed(level);
 
-  trackPosition += speed * dt * 50;
-  score += speed * dt * 10;
+    trackPosition += speed * dt * 50;
+    score += speed * dt * 10;
 
-  // ── JUMP PHYSICS ──
-  if (inputState.jumpTriggered && playerJumpHeight <= 0) {
-    playerJumpVelocity = JUMP_FORCE; // blast off!
-  }
-  inputState.jumpTriggered = false;
-
-  // ── TILT CONTROLS ──
-  // Translate tiltX into lane movement. When tilt exceeds threshold, change lane. When steady, always reset to middle lane (0).
-  const TILT_LANE_THRESHOLD = 0.2; // Sensitivity threshold for lane changes.
-  if (Math.abs(inputState.tiltX) > TILT_LANE_THRESHOLD) {
-    // Tilt overrides lane direction regardless of previous swipe.
-    inputState.lane = inputState.tiltX > 0 ? 1 : -1;
-  } else {
-    // When device is steady, keep player in middle lane.
-    inputState.lane = 0;
-  }
-
-  if (playerJumpHeight >= 0) {
-    playerJumpHeight += playerJumpVelocity * dt;
-    playerJumpVelocity += GRAVITY * dt;
-
-    if (playerJumpHeight < 0) {
-      playerJumpHeight = 0;
-      playerJumpVelocity = 0;
+    // ── JUMP PHYSICS ──
+    if (inputState.jumpTriggered && playerJumpHeight <= 0) {
+      playerJumpVelocity = JUMP_FORCE; // blast off!
     }
-  }
+    inputState.jumpTriggered = false;
 
-  // ── OBSTACLE SPAWNING ──
-  spawnTimer += dt * speed;
-  if (spawnTimer > SPAWN_RATE) {
-    obstacles.push({
-      z: 5.0,
-      lane: Math.floor(Math.random() * 3) - 1,
-      type: 'barricade'
-    });
-    spawnTimer = 0;
-  }
-
-  // ── MOVE OBSTACLES & CHECK COLLISIONS ──
-  for (let i = obstacles.length - 1; i >= 0; i--) {
-    obstacles[i].z -= dt * speed * 0.4; 
+    // ── CONTROL METHOD SELECTION ──
+    const controlMethod = getControlMethod();
     
-    // The player is actually standing at Z = 0.14 based on the 1280px screen height.
-    if (obstacles[i].z < 0.08 && obstacles[i].z > 0.02) {
-      if (obstacles[i].lane === inputState.lane) {
-        // If your jump height isn't over 50, you crash!
-        if (playerJumpHeight < 50) {
-          isGameOver = true;
-          console.log("CRASH! Game Over.");
-        }
+    if (controlMethod === 'tilt') {
+      // ── TILT CONTROLS ──
+      // Translate tiltX into lane movement. When tilt exceeds threshold, change lane. When steady, preserve current lane.
+      const TILT_LANE_THRESHOLD = 0.2; // Sensitivity threshold for lane changes.
+      if (Math.abs(inputState.tiltX) > TILT_LANE_THRESHOLD) {
+        // Tilt overrides lane direction regardless of previous swipe.
+        inputState.lane = inputState.tiltX > 0 ? 1 : -1;
+        console.log('Tilt applied, lane set to', inputState.lane);
+      } else {
+        // No significant tilt; keep existing lane (do not reset).
+        console.log('No significant tilt, lane remains', inputState.lane);
+      }
+    } else {
+      // ── SWIPE CONTROLS ──
+      // For swipe controls, the lane is managed by swipe events
+      // No need to reset lane here, just preserve the current state
+      console.log('Swipe control active, lane:', inputState.lane);
+    }
+
+    if (playerJumpHeight >= 0) {
+      playerJumpHeight += playerJumpVelocity * dt;
+      playerJumpVelocity += GRAVITY * dt;
+
+      if (playerJumpHeight < 0) {
+        playerJumpHeight = 0;
+        playerJumpVelocity = 0;
       }
     }
 
-    // Let the obstacle travel further off-screen before culling it
-    if (obstacles[i].z < 0.02) {
-      obstacles.splice(i, 1); 
+    // ── OBSTACLE SPAWNING ──
+    spawnTimer += dt * speed;
+    if (spawnTimer > SPAWN_RATE) {
+      obstacles.push({
+        z: 5.0,
+        lane: Math.floor(Math.random() * 3) - 1,
+        type: 'barricade'
+      });
+      spawnTimer = 0;
+    }
+
+    // ── MOVE OBSTACLES & CHECK COLLISIONS ──
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+      obstacles[i].z -= dt * speed * 0.4;
+      
+      // The player is actually standing at Z = 0.14 based on the 1280px screen height.
+      if (obstacles[i].z < 0.08 && obstacles[i].z > 0.02) {
+        if (obstacles[i].lane === inputState.lane) {
+          // If your jump height isn't over 50, you crash!
+          if (playerJumpHeight < 50) {
+            isGameOver = true;
+            console.log("CRASH! Game Over.");
+          }
+        }
+      }
+
+      // Let the obstacle travel further off-screen before culling it
+      if (obstacles[i].z < 0.02) {
+        obstacles.splice(i, 1);
+      }
     }
   }
-}
 
 function render() {
   ctx.fillStyle = '#050510';
@@ -459,30 +486,66 @@ function render() {
     }
   }
   
-    // ── PLAYER RENDER LOGIC WITH Z-DEPTH ──
+   // ── PLAYER RENDER LOGIC WITH BATTERY TIERS ──
   const laneWidth = TRACK_HALF_WIDTH * 0.9;
   const targetX = inputState.lane * laneWidth;
   playerVisualX += (targetX - playerVisualX) * 0.25;
 
   const playerAsset = assetCache['player'];
   if (playerAsset) {
-    const FRAME_SIZE = 120; // Original frame size
-    
-    // 1. Calculate animation speed/frame
-    const level = getBatteryLevel();
-    const speed = getBatterySpeed(level);
-    const animationSpeed = Math.max(50, 150 / (speed * 0.5));
-    const frameIndex = Math.floor(Date.now() / animationSpeed) % 5;
+    const FRAME_SIZE = 120;
+    const level = getBatteryLevel(); // 0.0 to 1.0
 
-    // 2. Perspective Math: Player grows as they move toward playerVisualZ 1.0
-    const scale = 0.5 + (playerVisualZ * 0.5); // Adjust this to make base player size bigger/smaller
+    // 1. Determine Row based on Battery Level
+    // 1.0 - 0.75 = Row 0, 0.75 - 0.50 = Row 1, 0.50 - 0.25 = Row 2
+    let row = 0;
+    if (level < 0.25) row = 2; // Clamp to bottom row
+    else if (level < 0.50) row = 2;
+    else if (level < 0.75) row = 1;
+    else row = 0;
+
+    // 2. Determine Frame Index
+    let frameIndex;
+        if (playerJumpHeight > 0) {
+      // 1. Calculate how far we are into the jump (0.0 to 1.0)
+      // We use playerJumpHeight / peakJumpHeight (assuming 300 is max height)
+      const peakJumpHeight = 300; 
+      const progress = Math.min(1, Math.abs(playerJumpHeight) / peakJumpHeight); 
+      
+      // 2. Logic: 
+      // Ascent (0.0 to 1.0 height): Map to frames 5, 6, 7 (index 5-7)
+      // Descent (1.0 to 0.0 height): Map to frames 8, 9 (index 8-9)
+      
+      // Determine if we are going up (positive velocity) or down (negative)
+      const isAscending = playerJumpVelocity > 0;
+      
+      if (isAscending) {
+        // Map 0.0-1.0 height to index 5, 6, 7
+        frameIndex = 5 + Math.floor(progress * 2.99);
+      } else {
+        // Map 1.0-0.0 height to index 8, 9
+        // We invert the progress so as we go down, we advance through frames 8 and 9
+        const descentProgress = 1 - progress;
+        frameIndex = 8 + Math.floor(descentProgress * 1.99);
+      }
+      
+      // Safety: Ensure it stays within range [5, 9]
+      frameIndex = Math.max(5, Math.min(9, frameIndex));
+    } else {
+      // RUN ANIMATION (already works correctly with looping)
+      const level = getBatteryLevel();
+      const speed = getBatterySpeed(level);
+      const animationSpeed = Math.max(50, 150 / (speed * 0.5));
+      frameIndex = Math.floor(Date.now() / animationSpeed) % 5;
+    }
+
+    // 3. Perspective & Position
+    const scale = 0.5 + (playerVisualZ * 0.5);
     const drawSize = 250 * scale; 
-
-    // 3. Position math: Linked to horizon and Z-depth
     const pScreenX = (canvasWidth / 2 + CAMERA_X_OFFSET) + (playerVisualX * scale);
     const pScreenY = horizonY + ((canvasHeight - horizonY) * playerVisualZ) - (drawSize / 2) - playerJumpHeight;
 
-    // Optional: Draw jump shadow
+    // 4. Draw jump shadow
     if (playerJumpHeight > 0) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
       ctx.beginPath();
@@ -490,11 +553,12 @@ function render() {
       ctx.fill();
     }
 
-    // 4. Draw the cropped frame
+    // 5. Draw the cropped frame using row * FRAME_SIZE for Y offset
     ctx.drawImage(
       playerAsset, 
-      frameIndex * FRAME_SIZE, 0, FRAME_SIZE, FRAME_SIZE,
-      pScreenX - (250 / 2), pScreenY, 250, 250
+      frameIndex * FRAME_SIZE, row * FRAME_SIZE, // Source X, Y (row offset)
+      FRAME_SIZE, FRAME_SIZE,                    // Source Width, Height
+      pScreenX - (250 / 2), pScreenY, 250, 250   // Dest
     );
   }
   
@@ -551,21 +615,28 @@ function renderPauseScreen() {
   ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
+  const settings = loadSettings();
+  const hasTilt = settings.hasTiltSensor;
+
   ctx.fillStyle = '#f0c040';
   ctx.font = '40px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('CRITICAL BREAK', canvasWidth / 2, canvasHeight / 2 - 100);
+  ctx.fillText('CRITICAL BREAK', canvasWidth / 2, canvasHeight / 2 - 120);
 
   ctx.fillStyle = 'white';
   ctx.font = '20px monospace';
-  ctx.fillText('Save or Load Game', canvasWidth / 2, canvasHeight / 2 - 60);
+  ctx.fillText(hasTilt ? 'Save, Load, or Change Controls' : 'Save or Load Game', canvasWidth / 2, canvasHeight / 2 - 80);
   
   // Draw buttons
   const buttonWidth = 200;
   const buttonHeight = 50;
   const buttonSpacing = 20;
   const startX = canvasWidth / 2 - buttonWidth / 2;
-  let startY = canvasHeight / 2 - buttonHeight - buttonSpacing / 2; // Adjusted to make space for save button above resume
+  
+  // Calculate total height based on whether controls button is shown
+  const totalButtons = hasTilt ? 4 : 3;
+  const totalHeight = totalButtons * buttonHeight + (totalButtons - 1) * buttonSpacing;
+  let startY = canvasHeight / 2 - totalHeight / 2;
   
   // Save Button
   ctx.fillStyle = pauseButtonState.save ? '#f0c040' : '#1a1a2e';
@@ -578,9 +649,8 @@ function renderPauseScreen() {
   ctx.textAlign = 'center';
   ctx.fillText('SAVE GAME', canvasWidth / 2, startY + buttonHeight / 2 + 10);
 
-  startY = canvasHeight / 2; // Reset startY for Resume and Load buttons
-
   // Resume Button
+  startY += buttonHeight + buttonSpacing;
   ctx.fillStyle = pauseButtonState.resume ? '#f0c040' : '#1a1a2e';
   ctx.strokeStyle = '#f0c040';
   ctx.lineWidth = 2;
@@ -591,16 +661,33 @@ function renderPauseScreen() {
   ctx.textAlign = 'center';
   ctx.fillText('RESUME', canvasWidth / 2, startY + buttonHeight / 2 + 10);
   
+  // Controls Button (only if tilt sensor detected)
+  if (hasTilt) {
+    startY += buttonHeight + buttonSpacing;
+    const controlText = `CONTROLS: ${settings.controlMethod.toUpperCase()}`;
+    
+    ctx.fillStyle = pauseButtonState.controls ? '#f0c040' : '#1a1a2e';
+    ctx.strokeStyle = '#f0c040';
+    ctx.lineWidth = 2;
+    ctx.fillRect(startX, startY, buttonWidth, buttonHeight);
+    ctx.strokeRect(startX, startY, buttonWidth, buttonHeight);
+    ctx.fillStyle = '#000';
+    ctx.font = '16px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(controlText, canvasWidth / 2, startY + buttonHeight / 2 + 10);
+  }
+  
   // Load Button
+  startY += buttonHeight + buttonSpacing;
   ctx.fillStyle = pauseButtonState.load ? '#f0c040' : '#1a1a2e';
   ctx.strokeStyle = '#f0c040';
   ctx.lineWidth = 2;
-  ctx.fillRect(startX, startY + buttonHeight + buttonSpacing, buttonWidth, buttonHeight);
-  ctx.strokeRect(startX, startY + buttonHeight + buttonSpacing, buttonWidth, buttonHeight);
+  ctx.fillRect(startX, startY, buttonWidth, buttonHeight);
+  ctx.strokeRect(startX, startY, buttonWidth, buttonHeight);
   ctx.fillStyle = '#000';
   ctx.font = '20px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('LOAD GAME', canvasWidth / 2, startY + buttonHeight + buttonSpacing + buttonHeight / 2 + 10);
+  ctx.fillText('LOAD GAME', canvasWidth / 2, startY + buttonHeight / 2 + 10);
 }
 
 /**
