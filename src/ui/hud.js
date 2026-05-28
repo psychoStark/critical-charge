@@ -1,0 +1,237 @@
+// src/ui/hud.js
+// ─────────────────────────────────────────────────────────────────────────────
+// In-game HUD only — drawn every frame while game is running.
+// No overlays, no buttons that need hit-testing.
+// The pause button IS a registered button so tapping it reliably works.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Theme (matches screens.js) ───────────────────────────────────────────────
+const T = {
+  accent:       '#a855f7',
+  accentCyan:   '#22d3ee',
+  accentYellow: '#fbbf24',
+  accentHot:    '#d946ef',
+  textPrimary:  '#f3e8ff',
+  textSecond:   '#a78bfa',
+  textDim:      '#4c1d95',
+  bgPanel:      'rgba(18,0,38,0.75)',
+  borderPanel:  'rgba(124,58,237,0.6)',
+  battCrit:     '#f43f5e',   // ≤20 %
+  battLow:      '#fb923c',   // ≤40 %
+  battMid:      '#a855f7',   // ≤70 %
+  battFull:     '#22d3ee',   // >70 %
+  scanline:     'rgba(167,139,250,0.03)',
+};
+
+// ── Module state ─────────────────────────────────────────────────────────────
+let _ctx    = null;
+let _W      = 640;
+let _H      = 360;
+let _onPause = () => {};
+
+// Pause button bounding box in canvas-space (rebuilt each frame)
+let _pauseBtn = { x: 0, y: 0, w: 0, h: 0 };
+
+// ── Debug overlay state ────────────────────────────────────────
+let _debugTap = null;  // { x, y, time } — last tap position
+let _debugHit = false;  // whether last tap hit the button
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+export function initHUD(canvas, callbacks = {}) {
+  _ctx     = canvas.getContext('2d');
+  _W       = canvas.width;
+  _H       = canvas.height;
+  _onPause = callbacks.onPause ?? (() => {});
+
+  // Single pointer listener for the pause button only.
+  // Checked against the bbox drawn last frame — no stale coords.
+  // Ensure we only add the listener once per canvas.
+  if (typeof window !== 'undefined' && !window.__hudListenerAdded) {
+    canvas.addEventListener('pointerdown', e => {
+      const rect = canvas.getBoundingClientRect();
+      const scale = Math.min(rect.width / canvas.width, rect.height / canvas.height);
+      const offsetX = (rect.width - canvas.width * scale) / 2;
+      const offsetY = (rect.height - canvas.height * scale) / 2;
+      const x = (e.clientX - rect.left - offsetX) / scale;
+      const y = (e.clientY - rect.top - offsetY) / scale;
+      const b = _pauseBtn;
+      _debugTap = { x, y, time: Date.now() };
+      const hit = x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+      console.log('[HUD] pointerdown', { x, y, hit, button: b });
+      if (hit) {
+        _debugHit = true;
+        e.stopPropagation();
+        _onPause();
+      } else {
+        _debugHit = false;
+      }
+    });
+    window.__hudListenerAdded = true;
+    console.log('[HUD] pointer listener added');
+  }
+}
+
+// ── Main draw call — called by renderHUD() in engine.js ──────────────────────
+export function renderHUD(score, highScore, batteryLevel, speed) {
+  const ctx     = _ctx;
+  const percent = Math.round(batteryLevel * 100);
+
+  // ── Top-left: Score panel ─────────────────────────────────────────────────
+  _drawHudPanel(12, 10, 160, 52);
+  ctx.textAlign   = 'left';
+  ctx.fillStyle   = T.accentYellow;
+  ctx.font        = 'bold 18px monospace';
+  ctx.fillText(`${Math.floor(score)}`, 22, 32);
+  ctx.fillStyle   = T.textSecond;
+  ctx.font        = '10px monospace';
+  ctx.fillText('SCORE', 22, 47);
+
+  ctx.fillStyle   = T.textDim;
+  ctx.font        = '10px monospace';
+  ctx.fillText(`HI  ${Math.floor(highScore)}`, 90, 32);
+
+  // ── Top-right: Battery panel ──────────────────────────────────────────────
+  _drawHudPanel(_W - 172, 10, 160, 52);
+  const battColor = percent <= 20 ? T.battCrit
+                  : percent <= 40 ? T.battLow
+                  : percent <= 70 ? T.battMid
+                  : T.battFull;
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = battColor;
+  if (percent <= 20) {
+    // Pulsing glow on critical battery
+    ctx.shadowColor = battColor;
+    ctx.shadowBlur  = 12 + Math.sin(Date.now() / 200) * 6;
+  }
+  ctx.font = 'bold 18px monospace';
+  ctx.fillText(`${percent}%`, _W - 22, 32);
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = T.textSecond;
+  ctx.font      = '10px monospace';
+  ctx.fillText('BATTERY', _W - 22, 47);
+
+  // Velocity sub-label
+  ctx.fillStyle = T.textDim;
+  ctx.font      = '10px monospace';
+  ctx.fillText(`${speed.toFixed(1)}×`, _W - 90, 32);
+
+  // Battery fill bar (thin strip under the panel)
+  const barW  = 160;
+  const barX  = _W - 172;
+  const barY  = 62;
+  const barH  = 3;
+  ctx.fillStyle = T.borderPanel;
+  ctx.fillRect(barX, barY, barW, barH);
+  ctx.fillStyle = battColor;
+  ctx.fillRect(barX, barY, Math.round(barW * batteryLevel), barH);
+
+  // ── Top-center: Pause button ──────────────────────────────────────────────
+  const PBW = 80, PBH = 30;
+  const PBX = _W / 2 - PBW / 2;
+  const PBY = 10;
+  _pauseBtn = { x: PBX, y: PBY, w: PBW, h: PBH };
+
+  ctx.shadowColor = T.accent;
+  ctx.shadowBlur  = 8;
+  ctx.fillStyle   = T.bgPanel;
+  ctx.fillRect(PBX, PBY, PBW, PBH);
+  ctx.shadowBlur  = 0;
+
+  ctx.strokeStyle = T.borderPanel;
+  ctx.lineWidth   = 1;
+  ctx.strokeRect(PBX, PBY, PBW, PBH);
+
+  ctx.fillStyle   = T.textSecond;
+  ctx.font        = '12px monospace';
+  ctx.textAlign   = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('⏸  PAUSE', _W / 2, PBY + PBH / 2);
+  ctx.textBaseline = 'alphabetic';
+
+  // ── Critical battery warning strip ───────────────────────────────────────
+  if (percent <= 20) {
+    const pulse = (Math.sin(Date.now() / 180) + 1) / 2; // 0 → 1
+    ctx.fillStyle = `rgba(244,63,94,${0.06 + pulse * 0.08})`;
+    ctx.fillRect(0, 0, _W, _H);
+
+    ctx.fillStyle   = T.battCrit;
+    ctx.font        = 'bold 11px monospace';
+    ctx.textAlign   = 'center';
+    ctx.shadowColor = T.battCrit;
+    ctx.shadowBlur  = 8;
+    ctx.fillText('⚡  CRITICAL CHARGE  ⚡', _W / 2, _H - 14);
+    ctx.shadowBlur  = 0;
+  }
+
+  // ── Speed boost flash ─────────────────────────────────────────────────────
+  if (percent <= 10) {
+    ctx.fillStyle = `rgba(217,70,239,${0.04 + Math.random() * 0.04})`;
+    ctx.fillRect(0, 0, _W, _H);
+  }
+
+  // ── Scanline overlay ──────────────────────────────────────────────────────
+  for (let y = 0; y < _H; y += 4) {
+    ctx.fillStyle = T.scanline;
+    ctx.fillRect(0, y, _W, 1);
+  }
+
+  // ── Debug overlay: show last tap position ─────────────────
+  if (typeof window !== 'undefined' && window.__SHOW_DEBUG && _debugTap && Date.now() - _debugTap.time < 2000) {
+    // Crosshair at tap position
+    ctx.strokeStyle = _debugHit ? '#00ff00' : '#ff0000';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(_debugTap.x - 10, _debugTap.y);
+    ctx.lineTo(_debugTap.x + 10, _debugTap.y);
+    ctx.moveTo(_debugTap.x, _debugTap.y - 10);
+    ctx.lineTo(_debugTap.x, _debugTap.y + 10);
+    ctx.stroke();
+
+    // Label
+    ctx.fillStyle = _debugHit ? '#00ff00' : '#ff0000';
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(
+      _debugHit ? 'HIT' : 'MISS',
+      _debugTap.x + 14, _debugTap.y + 4
+    );
+
+    // Draw pause button outline for visual reference
+    ctx.strokeStyle = '#ffff00';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(_pauseBtn.x, _pauseBtn.y, _pauseBtn.w, _pauseBtn.h);
+    ctx.setLineDash([]);
+  }
+
+  // ── Debug overlay: show tilt value (test harness) ─────────────────
+  if (typeof window !== 'undefined' && window.__SHOW_DEBUG && window.__debugTilt !== undefined) {
+    ctx.fillStyle = '#ff00ff';
+    ctx.font = 'bold 12px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(`Tilt: ${window.__debugTilt}`,
+      _W - 10, 20);
+  }
+}
+
+// ── HUD panel helper ──────────────────────────────────────────────────────────
+function _drawHudPanel(x, y, w, h) {
+  const ctx = _ctx;
+  ctx.fillStyle   = T.bgPanel;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = T.borderPanel;
+  ctx.lineWidth   = 0.75;
+  ctx.strokeRect(x, y, w, h);
+  // Corner pip
+  ctx.fillStyle = T.accentCyan;
+  ctx.fillRect(x,         y,         3, 1);
+  ctx.fillRect(x,         y,         1, 3);
+  ctx.fillRect(x + w - 3, y,         3, 1);
+  ctx.fillRect(x + w - 1, y,         1, 3);
+  ctx.fillRect(x,         y + h - 1, 3, 1);
+  ctx.fillRect(x,         y + h - 3, 1, 3);
+  ctx.fillRect(x + w - 3, y + h - 1, 3, 1);
+  ctx.fillRect(x + w - 1, y + h - 3, 1, 3);
+}
