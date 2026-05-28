@@ -34,7 +34,7 @@ export function resetScore() {
  */
 export function updateScore(dt, speed) {
   // Score increases faster when battery is low (speed is high)
-  currentScore += speed * dt * 10;
+  currentScore += speed * dt * 6;
 }
 
 /**

@@ -91,8 +91,8 @@ function _initTouch() {
   window.addEventListener('touchstart', e => {
     startX = e.touches[0].clientX;
     startY = e.touches[0].clientY;
-    // Debug: show start coordinates if debug enabled
-    if (typeof window !== 'undefined' && window.__SHOW_DEBUG) {
+    // Debug: show start coordinates if test mode enabled
+    if (typeof window !== 'undefined' && window.__TEST_MODE) {
       const dbgTouch = document.getElementById('debug-touch');
       if (dbgTouch) dbgTouch.innerHTML = `Start: ${startX.toFixed(0)}, ${startY.toFixed(0)}`;
     }
@@ -106,8 +106,8 @@ function _initTouch() {
     // Must be a clear gesture (not a tap) to avoid eating button taps
     const isGesture = absDx > SWIPE_THRESHOLD || absDy > SWIPE_THRESHOLD;
     if (!isGesture) {
-      // Debug: show tap info if debug enabled
-      if (typeof window !== 'undefined' && window.__SHOW_DEBUG) {
+      // Debug: show tap info if test mode enabled
+      if (typeof window !== 'undefined' && window.__TEST_MODE) {
         const dbgTouch = document.getElementById('debug-touch');
         if (dbgTouch) dbgTouch.innerHTML = `Tap: ${dx.toFixed(0)}, ${dy.toFixed(0)}`;
       }
@@ -117,10 +117,11 @@ function _initTouch() {
     // Swipe up — jump
     if (absDy > absDx && dy < -SWIPE_THRESHOLD) {
       inputState.jumpTriggered = true;
-      // Debug: show swipe up
-      if (typeof window !== 'undefined' && window.__SHOW_DEBUG) {
+      // Debug: show swipe up (test mode)
+      if (typeof window !== 'undefined' && window.__TEST_MODE) {
         const dbgTouch = document.getElementById('debug-touch');
         if (dbgTouch) dbgTouch.innerHTML = `Swipe Up`;
+        console.log('[Input] Swipe Up detected');
       }
       return;
     }
@@ -128,10 +129,11 @@ function _initTouch() {
     // Swipe left / right — lane (swipe mode only)
     if (currentControlMethod === 'swipe' && absDx > absDy) {
       inputState.lane = Math.max(-1, Math.min(1, inputState.lane + (dx > 0 ? 1 : -1)));
-      // Debug: show swipe direction
-      if (typeof window !== 'undefined' && window.__SHOW_DEBUG) {
+      // Debug: show swipe direction (test mode)
+      if (typeof window !== 'undefined' && window.__TEST_MODE) {
         const dbgTouch = document.getElementById('debug-touch');
         if (dbgTouch) dbgTouch.innerHTML = `Swipe ${dx > 0 ? 'Right' : 'Left'}`;
+        console.log('[Input] Swipe', dx > 0 ? 'Right' : 'Left');
       }
     }
   }, { passive: true });
