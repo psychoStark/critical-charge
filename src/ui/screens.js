@@ -382,7 +382,7 @@ export function renderGameOverScreen(score, highScore, isNewHighScore = false) {
   const BX = _W / 2 - BW / 2;
   let BY   = PY + 132;
 
-  _drawButton('⚡  RESTART',    BX, BY, BW, BH, _onRestart, 'hot');
+  _drawButton('🔄  RESTART',    BX, BY, BW, BH, _onRestart, 'hot');
   BY += BH + GAP;
   _drawButton('📂  LOAD GAME', BX, BY, BW, BH, _onLoad,    'dim');
 }

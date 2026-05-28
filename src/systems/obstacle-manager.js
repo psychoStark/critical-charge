@@ -7,7 +7,7 @@ let obstacles = [];
 // To add new enemies later, add their string names to this array.
 // IMPORTANT: The string must perfectly match the 'id' you give the image in asset-cache.js!
 // Example for later: const ENEMY_TYPES = ['enemy_charger', 'drone', 'laser_wall'];
-const ENEMY_TYPES = ['enemy_charger']; 
+const ENEMY_TYPES = ['enemy_charger']; // Placeholder for future enemy types – add new IDs here and define their speed multipliers.
 
 export function resetObstacles() {
   obstacles = [];
