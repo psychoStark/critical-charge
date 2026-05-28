@@ -15,7 +15,7 @@ export const assetCache = {};
  * This asset is used for rendering obstacles that the player must avoid.
  * @type {string}
  */
-const BARRICADE_SPRITE_SHEET = '/src/assets/enemycharger_dynamicgrid.png';
+const CHARGER_SPRITE_SHEET = '/src/assets/enemycharger_dynamicgrid.png';
 
 /***
  * Path to the player character SVG asset.
@@ -31,8 +31,8 @@ const PLAYER_SPRITE_SHEET = '/src/assets/herosprite_dynamicgrid.png';
  */
 const assetList = [
   {
-    id: 'barricade',
-    src: BARRICADE_SPRITE_SHEET,
+    id: 'enemy_charger',
+    src: CHARGER_SPRITE_SHEET,
     type: 'png'
   },
   {

@@ -1,742 +1,437 @@
 // src/core/engine.js
-// Core game engine that handles game state, physics, rendering, and gameplay mechanics.
-// This file manages the main game loop, player movement, obstacle generation, collision detection,
-// and visual rendering of all game elements.
+// Core game engine — game state, physics, obstacle logic, rendering pipeline.
+// UI screens (pause, game over) are delegated to src/ui/screens.js
+// HUD (score, battery, pause button) is delegated to src/ui/hud.js
+// Input is read from src/core/input.js — this file never touches event listeners.
 
-import { getBatteryLevel, getBatterySpeed } from './battery.js';
-import { assetCache } from '../systems/asset-cache.js';
-import { inputState, getControlMethod, checkTiltSensor, setControlMethod } from './input.js';
-import { getHighScore, checkAndSaveHighScore, saveGameData, loadSavedGameData } from '../systems/save-system.js';
-import { loadSettings } from '../systems/settings.js';
+import { getBatteryLevel, getBatterySpeed }              from './battery.js';
+import { assetCache }                                    from '../systems/asset-cache.js';
+import { inputState, getControlMethod,
+         checkTiltSensor, setControlMethod }             from './input.js';
+import { getHighScore, checkAndSaveHighScore,
+         saveGameData, loadSavedGameData }               from '../systems/save-system.js';
+import { loadSettings }                                  from '../systems/settings.js';
+import { initScreens,
+         renderPauseScreen     as _renderPause,
+         renderGameOverScreen  as _renderGameOver,
+         clearScreenButtons,
+         triggerSaveMessage,
+         renderSaveOverlay }                             from '../ui/screens.js';
+import { initHUD, renderHUD    as _renderHUD }           from '../ui/hud.js';
+import { resetScore, 
+         updateScore, 
+         getCurrentScore, 
+         getSessionHighScore, 
+         finalizeScore, 
+         setScore }                                      from '../systems/score.js';
+import { applyGravity, checkCollision }                  from './physics.js';
+import { lerp }                                          from '../utils/lerp.js';
+import { resetObstacles, 
+         spawnRandomObstacle, 
+         updateAndGetObstacles, 
+         setObstacles }                                  from '../systems/obstacle-manager.js';
+import { resetPlayer, updatePlayer, renderPlayer, getPlayerJumpHeight } from './player.js';
 
-/**
- * 2D rendering context for the game canvas.
- * Used to draw all game elements including the player, obstacles, and environment.
- * @type {CanvasRenderingContext2D}
- */
+// ── Canvas / context ─────────────────────────────────────────────────────────
 let ctx;
-// Store a reference to the canvas element used by the engine.
-// This is needed for event handlers like handleCanvasClick that reference the canvas globally.
 let canvas;
-
-/**
- * Width of the game canvas in pixels.
- * Determines the horizontal boundaries for rendering game elements.
- * @type {number}
- */
 let canvasWidth;
-
-/**
- * Height of the game canvas in pixels.
- * Determines the vertical boundaries for rendering game elements.
- * @type {number}
- */
 let canvasHeight;
 
-// Renderer configuration - export these so they can be modified by test pages
-export let SCROLL_SPEED = 3.0; // Adjusts how fast the game world scrolls past the player. Higher values mean faster scrolling.
-export let CAMERA_X_OFFSET = 0; // Shifts the camera left or right. Positive values move the camera right.
-export let HORIZON_Y = 0; // Determines the vertical position of the horizon line. Changes where the distant road appears. // Will be set to canvasHeight / 2 - 200 in startEngine
-export let TRACK_HALF_WIDTH = 200; // Sets half the width of the playable road area. Affects how wide the lanes are.
+// ── Renderer config (exported so test pages can override) ────────────────────
+export let SCROLL_SPEED      = 3.0;
+export let CAMERA_X_OFFSET   = 0;
+export let HORIZON_Y         = 0;   // set to canvasHeight/2 - 200 on boot
+export let TRACK_HALF_WIDTH  = 200;
 
-/**
- * Current position along the infinite track/road.
- * This value increases as the player moves forward, creating the illusion of endless running.
- * Used to calculate road stripe positions and scrolling effects.
- * @type {number}
- */
-let trackPosition = 0;
+export function setRendererConfig(config) {
+  if (config.scrollSpeed  !== undefined) SCROLL_SPEED     = config.scrollSpeed;
+  if (config.cameraX      !== undefined) CAMERA_X_OFFSET  = config.cameraX;
+  if (config.horizonY     !== undefined) HORIZON_Y        = config.horizonY;
+  if (config.trackHalf    !== undefined) TRACK_HALF_WIDTH = config.trackHalf;
+}
 
-/**
- * Timestamp of the last frame update.
- * Used to calculate delta time (dt) for smooth, frame-rate-independent animations.
- * @type {number}
- */
-let lastTime = 0;
+// ── Physics config ───────────────────────────────────────────────────────────
+export let GRAVITY    = -3500;
+export let JUMP_FORCE = 1200;
 
-/**
- * Array of active obstacles currently in the game world.
- * Each obstacle has properties like position (z), lane, and type.
- * Obstacles are spawned ahead of the player and move toward them.
- * @type {Array<{z: number, lane: number, type: string}>}
- */
-let obstacles = [];
+export function setEngineConfig(config) {
+  if (config.jumpForce !== undefined) JUMP_FORCE = config.jumpForce;
+  if (config.gravity   !== undefined) GRAVITY    = config.gravity;
+}
 
-/**
- * Timer that tracks when to spawn the next obstacle.
- * Increases based on game speed; when it exceeds 1.5, a new obstacle is spawned.
- * @type {number}
- */
+// ── Spawn config ─────────────────────────────────────────────────────────────
 export let spawnTimer = 0;
-export let SPAWN_RATE = 1.5; // Controls how frequently new obstacles appear. Lower values mean more frequent obstacles.
+export let SPAWN_RATE = 1.5;
 
-/**
- * Visual X position of the player for smooth animation.
- * This value smoothly interpolates toward the target lane position.
- * @type {number}
- */
-let playerVisualX = 0;
-let playerVisualZ = 0.75; // 0.0 is horizon, 1.0 is bottom of screen
+export function setSpawnRate(rate) { SPAWN_RATE = rate; }
 
-/**
- * Current jump height of the player in pixels.
- * When > 0, the player is jumping/airborne. When 0, the player is on the ground.
- * Directly affects the player's vertical position in the game world.
- * @type {number}
- */
-let playerJumpHeight = 0;
+// ── Game state ───────────────────────────────────────────────────────────────
+let trackPosition      = 0;
+let lastTime           = 0;
+let obstacles          = [];
+let isGameOver         = false;
+let isPaused           = false;
 
-/**
- * Current vertical velocity of the player's jump.
- * Positive values mean upward movement, negative values mean downward movement.
- * Modified by gravity each frame to create realistic jump arcs.
- * @type {number}
- */
-let playerJumpVelocity = 0;
-
-/**
- * Gravity constant that pulls the player downward during jumps.
- * Higher absolute values create stronger gravity and shorter jumps.
- * @type {number}
- */
-export let GRAVITY = -3500; // Adjusts the strength of gravity affecting the player's jumps. More negative means stronger gravity.
-
-/**
- * Initial upward force applied when the player jumps.
- * Higher values create higher, longer jumps.
- * @type {number}
- */
-export let JUMP_FORCE = 1200; // Determines how high the player jumps. Higher values result in higher jumps.
-
-/**
- * Player's current score, based on distance traveled.
- * Increases continuously as the player moves forward.
- * Higher speeds (from low battery) increase the score faster.
- * @type {number}
- */
-let score = 0;
-let highScore = 0;
-
-/**
- * Game state flag indicating whether the game is over.
- * When true, the game loop stops updating and shows the game over screen.
- * @type {boolean}
- */
-let isGameOver = false;
-let isPaused = false;
-
-// Button states for pause and game over screens
-let pauseButtonState = { resume: false, load: false, save: false, controls: false };
-let gameOverButtonState = { restart: false, load: false };
-
-/**
- * Initializes the game engine and starts a new game session.
- * Resets all game state variables to their initial values and begins the game loop.
- *
- * @param {HTMLCanvasElement} canvas - The canvas element to render the game on
- */
+// ── Boot ─────────────────────────────────────────────────────────────────────
 export function startEngine(canvasParam) {
-  // Initialize the 2D rendering context for drawing game elements
-  // Save the canvas reference for later use (e.g., click handling)
-  canvas = canvasParam;
-  ctx = canvas.getContext('2d');
+  canvas      = canvasParam;
+  ctx         = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = false;
-  console.log('Engine started with canvas', canvas.width, canvas.height);
-  
-  // Store canvas dimensions for use in rendering calculations
-  canvasWidth = canvas.width;
+  canvasWidth  = canvas.width;
   canvasHeight = canvas.height;
 
-  // Add click handling for UI buttons on pause and game over screens
-  canvas.addEventListener('click', handleCanvasClick);
+  // Wire screens.js — it owns all overlay pointer handling
+  initScreens(canvas, {
+    // Resume only if the game is currently paused to avoid toggling unintentionally on taps during active play
+    onResume:         () => { if (isPaused) togglePause(); },
+    onRestart:        () => startEngine(canvas),
+    onSave:           () => saveGame(),
+    onLoad:           () => loadSavedGame(),
+    onToggleControls: () => {
+      const next = getControlMethod() === 'swipe' ? 'tilt' : 'swipe';
+      console.log('[Engine] Toggling control method from', getControlMethod(), 'to', next);
+      setControlMethod(next);
+      // Re-render pause screen to reflect updated control method label
+      _renderPause(getCurrentScore(), getSessionHighScore());
+    },
+  });
+  // Ensure no stale button registrations persist across restarts
+  clearScreenButtons();
 
-  // Initialize high score from storage on bootstrap
-  highScore = getHighScore();
+  // Wire hud.js — it owns the pause button pointer handling
+  initHUD(canvas, {
+    onPause: () => togglePause(),
+  });
 
-  // Reset all game state variables to their initial values
-  score = 0; // Reset player score to zero
-  isGameOver = false; // Clear game over state to start fresh
+  // Reset all game state
+  resetScore();
+  isGameOver         = false;
+  isPaused           = false;
+  resetObstacles();
+  obstacles          = [];
+  trackPosition      = 0;
+  spawnTimer         = 0;
+  resetPlayer();
+  HORIZON_Y          = canvasHeight / 2 - 200;
 
-  // Initialize renderer constants based on canvas dimensions
-  HORIZON_Y = canvasHeight / 2 - 200;
-  isPaused = false;         // Ensure the game starts unpaused
-  obstacles = [];           // Remove all existing obstacles from the game world
-  trackPosition = 0;        // Reset track position to the starting point
-  spawnTimer = 0;           // Reset obstacle spawn timer
-  playerVisualX = 0;        // Reset player's visual X position (center lane)
-  playerJumpHeight = 0;     // Reset player's jump height (on the ground)
-  playerJumpVelocity = 0;   // Reset player's jump velocity (stationary)
-
-  // Initialize the game loop with the current timestamp
   lastTime = performance.now();
   requestAnimationFrame(gameLoop);
 }
 
-/**
- * Handle mouse clicks on the canvas to activate UI buttons when the game is paused
- * or when the game over screen is displayed.
- */
-function handleCanvasClick(event) {
-  const rect = canvas.getBoundingClientRect();
-  // Translate mouse coordinates to canvas space (account for internal resolution scaling)
-  const x = (event.clientX - rect.left) * (canvas.width / rect.width);
-  const y = (event.clientY - rect.top) * (canvas.height / rect.height);
-
-  const buttonWidth = 200;
-  const buttonHeight = 50;
-  const buttonSpacing = 20;
-
-  // Pause screen buttons are centered vertically at canvasHeight/2
-  const pauseStartX = canvasWidth / 2 - buttonWidth / 2;
-  let pauseStartY = canvasHeight / 2 - buttonHeight - buttonSpacing; // Start higher to fit all buttons
-
-  // Game over screen buttons start a bit lower
-  const overStartX = canvasWidth / 2 - buttonWidth / 2;
-  const overStartY = canvasHeight / 2 + 20;
-
-  if (isPaused) {
-    // Save button
-    if (x >= pauseStartX && x <= pauseStartX + buttonWidth &&
-        y >= pauseStartY && y <= pauseStartY + buttonHeight) {
-      saveGame();
-      return;
-    }
-    
-    // Resume button
-    pauseStartY += buttonHeight + buttonSpacing;
-    if (x >= pauseStartX && x <= pauseStartX + buttonWidth &&
-        y >= pauseStartY && y <= pauseStartY + buttonHeight) {
+// ── Keyboard shortcuts — call once from main.js after startEngine ─────────────
+// Kept separate from input.js because these are engine commands, not game input.
+export function initEngineKeyBindings() {
+  console.log('[Engine] initEngineKeyBindings called');
+  const handler = e => {
+    // Ignore key repeat events to prevent rapid toggling
+    if (e.repeat) return;
+    console.log('[Engine] keydown', { key: e.key, code: e.code, isGameOver, isPaused });
+    if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+      console.log('[Engine] pause key matched — calling togglePause');
+      _debugKeyPress = 'P';  // visual debug
+      _debugKeyTime = Date.now();
       togglePause();
-      return;
     }
-    
-    // Controls button (only if tilt sensor detected)
-    pauseStartY += buttonHeight + buttonSpacing;
-    const settings = loadSettings();
-    if (settings.hasTiltSensor) {
-      if (x >= pauseStartX && x <= pauseStartX + buttonWidth &&
-          y >= pauseStartY && y <= pauseStartY + buttonHeight) {
-        // Toggle between swipe and tilt controls
-        const newMethod = settings.controlMethod === 'swipe' ? 'tilt' : 'swipe';
-        setControlMethod(newMethod);
-        return;
-      }
-    }
-    
-    // Load button
-    pauseStartY += buttonHeight + buttonSpacing;
-    if (x >= pauseStartX && x <= pauseStartX + buttonWidth &&
-        y >= pauseStartY && y <= pauseStartY + buttonHeight) {
-      loadSavedGame();
-      return;
-    }
-  }
-
-  if (isGameOver) {
-    // Restart button
-    if (x >= overStartX && x <= overStartX + buttonWidth &&
-        y >= overStartY && y <= overStartY + buttonHeight) {
-      // Restart the game by reinitializing the engine
+    if (e.code === 'Space' && isGameOver) {
       startEngine(canvas);
-      return;
     }
-    // Load button on game over
-    if (x >= overStartX && x <= overStartX + buttonWidth &&
-        y >= overStartY + buttonHeight + buttonSpacing &&
-        y <= overStartY + buttonHeight + buttonSpacing + buttonHeight) {
+    if (e.key === 'l' || e.key === 'L') {
       loadSavedGame();
-      return;
     }
-  }
+  };
+  document.addEventListener('keydown', handler);
+  window.addEventListener('keydown', handler);
 }
 
-/**
- * Toggles the running clock of the loop.
- */
+// Simple fallback key listener for "p" to ensure pause works
+window.addEventListener('keydown', e => {
+  if (e.key === 'p' || e.key === 'P') {
+    console.log('[Engine] fallback p key pressed');
+    togglePause();
+  }
+});
+
+// For debugging: show alert on "p" press (removed)
+
+// ── Debug key-press visual state ──────────────────────────────
+let _debugKeyPress = null;
+let _debugKeyTime = 0;
+
+// Global keydown listener for debug overlay (test harness only)
+if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', e => {
+    if (window.__SHOW_DEBUG) {
+      _debugKeyPress = e.key;
+      _debugKeyTime = Date.now();
+    }
+  });
+}
+
+// ── Pause / save / load ───────────────────────────────────────────────────────
 export function togglePause() {
-  if (isGameOver) return; // Can't pause if dead
-  
+  console.log('[Engine] togglePause called', { isGameOver, isPaused: !isPaused });
+  if (isGameOver) return;
   isPaused = !isPaused;
-  if (!isPaused) {
-    // Unpausing requires correcting lastTime so game objects don't jump gaps
-    lastTime = performance.now();
+  console.log('[Engine] togglePause new isPaused state', isPaused);
+  if (isPaused) {
+    // Render pause overlay immediately when pausing
+    _renderPause(getCurrentScore(), getSessionHighScore());
+  } else {
+    clearScreenButtons();
+    lastTime = performance.now(); 
     requestAnimationFrame(gameLoop);
   }
 }
 
-/**
- * Manually saves the current game state.
- */
 export function saveGame() {
-  saveGameData(score, trackPosition, obstacles);
-  console.log("Game state saved manually.");
-}
-
-/**
- * Loads manual save file data and rewrites runtime state variables
- */
-export function setEngineConfig(config) {
-  if (config.jumpForce !== undefined) JUMP_FORCE = config.jumpForce;
-  if (config.gravity !== undefined) GRAVITY = config.gravity;
+  saveGameData(getCurrentScore(), trackPosition, obstacles); 
+  console.log('Game saved.');
+  triggerSaveMessage();
+  _renderPause(getCurrentScore(), getSessionHighScore());
 }
 
 export function loadSavedGame() {
-  const saveData = loadSavedGameData();
-  if (!saveData) {
-    console.warn("No save file detected!");
-    return;
-  }
+  const data = loadSavedGameData();
+  if (!data) { console.warn('No save file found.'); return; }
+  setScore(data.score);
   
-  score = saveData.score;
-  trackPosition = saveData.trackPosition;
-  obstacles = saveData.obstacles;
-  isGameOver = false;
-  isPaused = true; // Stay paused on load so they have time to breathe
+  trackPosition = data.trackPosition;
   
-  // Force a single visual frame update to show loaded metrics
-  lastTime = performance.now();
+  // Send the loaded obstacles into the manager!
+  setObstacles(data.obstacles); 
+  obstacles = data.obstacles; // Keep our local rendering reference updated
+  
+  isGameOver    = false;
+  isPaused      = false;
+  clearScreenButtons();
+  lastTime      = performance.now();
   render();
-}
-
-/**
- * Main game loop that runs every frame using requestAnimationFrame.
- * Handles frame-rate-independent updates, game logic, and rendering.
- *
- * @param {number} time - Current timestamp from requestAnimationFrame
- */
-function gameLoop(time) {
-  // If game is over, only render the game over screen and stop updates
-  if (isGameOver) {
-    // Check if the death score ranks as a record
-    checkAndSaveHighScore(score);
-    highScore = getHighScore();
-    renderGameOver();
-    return; // Stop the loop!
-  }
-
-  // If paused, render the pause screen and halt physics updates
-  if (isPaused) {
-    renderPauseScreen();
-    return; 
-  }
-
-  // Calculate delta time (dt) in seconds since the last frame
-  const dt = (time - lastTime) / 1000;
-  lastTime = time;
-
-  // Update game state based on the elapsed time
-  update(dt);
-  
-  // Render the current game state to the canvas
-  render();
-
-  // Schedule the next frame to continue the game loop
   requestAnimationFrame(gameLoop);
 }
 
-export function setSpawnRate(rate) {
-  SPAWN_RATE = rate;
-}
-
-function update(dt) {
-    // Get current battery level and calculate game speed based on it
-    const level = getBatteryLevel();
-    const speed = getBatterySpeed(level);
-
-    trackPosition += speed * dt * 50;
-    score += speed * dt * 10;
-
-    // ── JUMP PHYSICS ──
-    if (inputState.jumpTriggered && playerJumpHeight <= 0) {
-      playerJumpVelocity = JUMP_FORCE; // blast off!
-    }
-    inputState.jumpTriggered = false;
-
-    // ── CONTROL METHOD SELECTION ──
-    const controlMethod = getControlMethod();
-    
-    if (controlMethod === 'tilt') {
-      // ── TILT CONTROLS ──
-      // Translate tiltX into lane movement. When tilt exceeds threshold, change lane. When steady, preserve current lane.
-      const TILT_LANE_THRESHOLD = 0.2; // Sensitivity threshold for lane changes.
-      if (Math.abs(inputState.tiltX) > TILT_LANE_THRESHOLD) {
-        // Tilt overrides lane direction regardless of previous swipe.
-        inputState.lane = inputState.tiltX > 0 ? 1 : -1;
-        console.log('Tilt applied, lane set to', inputState.lane);
-      } else {
-        // No significant tilt; keep existing lane (do not reset).
-        console.log('No significant tilt, lane remains', inputState.lane);
-      }
-    } else {
-      // ── SWIPE CONTROLS ──
-      // For swipe controls, the lane is managed by swipe events
-      // No need to reset lane here, just preserve the current state
-      console.log('Swipe control active, lane:', inputState.lane);
-    }
-
-    if (playerJumpHeight >= 0) {
-      playerJumpHeight += playerJumpVelocity * dt;
-      playerJumpVelocity += GRAVITY * dt;
-
-      if (playerJumpHeight < 0) {
-        playerJumpHeight = 0;
-        playerJumpVelocity = 0;
-      }
-    }
-
-    // ── OBSTACLE SPAWNING ──
-    spawnTimer += dt * speed;
-    if (spawnTimer > SPAWN_RATE) {
-      obstacles.push({
-        z: 5.0,
-        lane: Math.floor(Math.random() * 3) - 1,
-        type: 'barricade'
-      });
-      spawnTimer = 0;
-    }
-
-    // ── MOVE OBSTACLES & CHECK COLLISIONS ──
-    for (let i = obstacles.length - 1; i >= 0; i--) {
-      obstacles[i].z -= dt * speed * 0.4;
-      
-      // The player is actually standing at Z = 0.14 based on the 1280px screen height.
-      if (obstacles[i].z < 0.08 && obstacles[i].z > 0.02) {
-        if (obstacles[i].lane === inputState.lane) {
-          // If your jump height isn't over 50, you crash!
-          if (playerJumpHeight < 50) {
-            isGameOver = true;
-            console.log("CRASH! Game Over.");
-          }
-        }
-      }
-
-      // Let the obstacle travel further off-screen before culling it
-      if (obstacles[i].z < 0.02) {
-        obstacles.splice(i, 1);
-      }
-    }
+// ── Main loop ─────────────────────────────────────────────────────────────────
+function gameLoop(time) {
+  if (isGameOver) {
+    const isNewRecord = finalizeScore(); // Handles the checking and saving automatically!
+    _renderGameOver(getCurrentScore(), getSessionHighScore(), isNewRecord);
+    return; // stop scheduling
   }
 
+  if (isPaused) {
+    // Continuously render pause overlay to allow UI updates
+    _renderPause(getCurrentScore(), getSessionHighScore()); // Updated to use getCurrentScore()
+    renderSaveOverlay();
+    requestAnimationFrame(gameLoop);
+    return;
+  }
+
+  const dt = Math.min((time - lastTime) / 1000, 0.05); // cap dt at 50ms
+  lastTime = time;
+
+  update(dt);
+  render();
+
+  requestAnimationFrame(gameLoop);
+}
+
+// ── Update ────────────────────────────────────────────────────────────────────
+function update(dt) {
+  const level = getBatteryLevel();
+  const speed = getBatterySpeed(level);
+
+  trackPosition += speed * dt * 50;
+  updateScore(dt, speed);
+
+  // ── Player Update (Managed by player.js) ──
+  
+  // Handle Tilt Input logic
+  if (getControlMethod() === 'tilt') {
+    const TILT_THRESHOLD = 0.2;
+    inputState.lane = Math.abs(inputState.tiltX) > TILT_THRESHOLD ? (inputState.tiltX > 0 ? 1 : -1) : 0;
+  }
+
+  // Update the player's physics and positioning
+  const laneWidth = TRACK_HALF_WIDTH * 0.9;
+  updatePlayer(dt, inputState.lane, laneWidth, inputState.jumpTriggered, JUMP_FORCE, GRAVITY);
+  
+  inputState.jumpTriggered = false; // consume jump input each frame AFTER player.js reads it
+
+  // ── Obstacle spawning (Managed by obstacle-manager.js) ──
+  spawnTimer += dt * speed;
+  if (spawnTimer > SPAWN_RATE) {
+    spawnRandomObstacle(5.0); // Spawns an obstacle at Z = 5.0
+    spawnTimer = 0;
+  }
+
+  // ── Move obstacles ──
+  obstacles = updateAndGetObstacles(dt, speed);
+
+  // ── Collision Check ──
+  const currentJumpHeight = getPlayerJumpHeight(); // Grab the height from player.js
+  
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    if (checkCollision(obstacles[i], inputState.lane, currentJumpHeight, 50)) {
+      isGameOver = true;
+      console.log("CRASH! Game Over.");
+    }
+  }
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
 function render() {
   ctx.fillStyle = '#050510';
   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-// ROAD RENDERING
+  _renderRoad();
+  _renderObstacles();
+  
+  // REPLACE the old _renderPlayer() call with this:
+  const playerAsset = assetCache['player'];
+  const level = getBatteryLevel();
+  const speed = getBatterySpeed(level);
+  
+  // This new function handles the sprite math, animation, and drawing
+  renderPlayer(ctx, playerAsset, canvasWidth, canvasHeight, HORIZON_Y, CAMERA_X_OFFSET, level, speed);
 
+  // Delegate HUD to hud.js
+  _renderHUD(getCurrentScore(), getSessionHighScore(), level, speed);
+  renderSaveOverlay();
+
+
+  // ── Debug: show key-press indicator ────────────────────────
+  if (typeof window !== 'undefined' && window.__SHOW_DEBUG && _debugKeyPress && Date.now() - _debugKeyTime < 1500) {
+    ctx.fillStyle = 'rgba(0,255,0,0.9)';
+    ctx.font = 'bold 24px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`KEY: ${_debugKeyPress}`, canvasWidth / 2, canvasHeight - 40);
+  }
+}
+
+// ── Road ──────────────────────────────────────────────────────────────────────
+function _renderRoad() {
   const horizonY = HORIZON_Y;
 
+  // Horizon glow line
   ctx.fillStyle = '#8000ff';
   ctx.fillRect(0, horizonY - 1, canvasWidth, 2);
 
-  const step = 3; // Controls the vertical spacing between road segments. Smaller values make the road appear smoother.
-
+  const step = 3;
   for (let y = horizonY; y < canvasHeight; y += step) {
-    const distance = 100 / (y - horizonY + 1);
-    const scale = 1.5 / distance;
-    const roadWidth = 20 + (125 * scale);
-    const textureY = distance * 200 + trackPosition * SCROLL_SPEED;
-
-    const isDark = Math.floor(textureY / 40) % 2 === 0;
-    const cx = canvasWidth / 2 + CAMERA_X_OFFSET;
-    const rw = roadWidth / 2;
+    const distance  = 100 / (y - horizonY + 1);
+    const scale     = 1.5 / distance;
+    const roadWidth = 20 + 125 * scale;
+    const textureY  = distance * 200 + trackPosition * SCROLL_SPEED;
+    const isDark    = Math.floor(textureY / 40) % 2 === 0;
+    const cx        = canvasWidth / 2 + CAMERA_X_OFFSET;
+    const rw        = roadWidth / 2;
+    const stripeWidth = 8 * scale;
 
     ctx.fillStyle = isDark ? '#111115' : '#1a1a20';
     ctx.fillRect(cx - rw, y, roadWidth, step);
-    
-    ctx.fillStyle = isDark ? '#8000ff' : '#333333';
-    ctx.fillRect(cx - rw - 15, y, 15, step); // Left edge
-    ctx.fillRect(cx + rw, y, 15, step);      // Right edge
-  }
 
-  // ── OBSTACLE RENDER LOGIC ──
+    // Purple edge stripes
+    ctx.fillStyle = isDark ? '#8000ff' : '#333333';
+    // Draw left stripe
+    ctx.fillRect(cx - rw - stripeWidth, y, stripeWidth, step);
+    // Draw right stripe
+    ctx.fillRect(cx + rw, y, stripeWidth, step);
+  }
+}
+
+// ── Obstacles ─────────────────────────────────────────────────────────────────
+function _renderObstacles() {
+  const horizonY = HORIZON_Y;
+
   obstacles.sort((a, b) => b.z - a.z);
 
   for (const obs of obstacles) {
-    if (obs.z > 2.0 || obs.z < 0.05) continue; // Only render obstacles within a certain Z-depth range (visible on screen).
+    if (obs.z > 2.0 || obs.z < 0.05) continue;
 
-    const visualZ = Math.max(obs.z, 0.05); // Ensures obstacles don't get too close to the camera, preventing visual glitches.
-    const scale = 1 / (visualZ / 0.5); // Calculates the size of the obstacle based on its distance (Z-depth). Further objects are smaller.
+    const visualZ   = Math.max(obs.z, 0.05);
+    const scale     = 1 / (visualZ / 0.5);
+    const baseW     = 50, baseH = 50;
+    const w         = baseW * scale;
+    const h         = baseH * scale;
+    const laneBase  = 20;
+    const screenX   = (canvasWidth / 2 + CAMERA_X_OFFSET) + (obs.lane * laneBase * scale);
+    const screenY   = horizonY + (100 * scale);
 
-    // Use 120px as the base size to match your sprite sheet resolution
-    const baseW = 50; // Base width of obstacles in pixels before scaling.
-    const baseH = 50; // Base height of obstacles in pixels before scaling.
-    const w = baseW * scale;
-    const h = baseH * scale;
-
-    // Define the base width of your lanes at "scale 1.0" (near the player)
-    const laneWidthAtPlayer = 20; // Adjust this to control how wide the lanes are at the player's position.
-    
-    // Calculate screenX by multiplying lane position by the current scale.
-    // As scale approaches 0 (at the horizon), screenX approaches (canvasWidth / 2 + CAMERA_X_OFFSET).
-    const screenX = (canvasWidth / 2 + CAMERA_X_OFFSET) + (obs.lane * laneWidthAtPlayer * scale);
-    
-    const screenY = horizonY + (100 * scale);
-
-    const asset = assetCache[obs.type]; // This is now your obstacle PNG
+    const asset = assetCache[obs.type];
     if (asset) {
-      // Animate: cycle through 5 frames (0-4)
-      const frameIndex = Math.floor(Date.now() / 150) % 5; // Current animation frame for obstacles (0-4).
-      const FRAME_SIZE = 120; // Size of each frame in the obstacle sprite sheet.
-
+      const frameIndex = Math.floor(Date.now() / 150) % 5;
+      const FRAME_SIZE = 120;
       ctx.drawImage(
         asset,
-        frameIndex * FRAME_SIZE, 0, FRAME_SIZE, FRAME_SIZE, // Source (Cropping)
-        screenX - w/2, screenY - h, w, h // Dest (Scaled)
+        frameIndex * FRAME_SIZE, 0, FRAME_SIZE, FRAME_SIZE,
+        screenX - w / 2, screenY - h, w, h
       );
     }
   }
-  
-   // ── PLAYER RENDER LOGIC WITH BATTERY TIERS ──
+}
+
+// ── Player ────────────────────────────────────────────────────────────────────
+function _renderPlayer() {
+  const horizonY  = HORIZON_Y;
   const laneWidth = TRACK_HALF_WIDTH * 0.9;
-  const targetX = inputState.lane * laneWidth;
-  playerVisualX += (targetX - playerVisualX) * 0.25;
+  const targetX   = inputState.lane * laneWidth;
+  playerVisualX   = lerp(playerVisualX, targetX, 0.25);
 
   const playerAsset = assetCache['player'];
-  if (playerAsset) {
-    const FRAME_SIZE = 120;
-    const level = getBatteryLevel(); // 0.0 to 1.0
+  if (!playerAsset) return;
 
-    // 1. Determine Row based on Battery Level
-    // 1.0 - 0.75 = Row 0, 0.75 - 0.50 = Row 1, 0.50 - 0.25 = Row 2
-    let row = 0;
-    if (level < 0.25) row = 2; // Clamp to bottom row
-    else if (level < 0.50) row = 2;
-    else if (level < 0.75) row = 1;
-    else row = 0;
+  const FRAME_SIZE = 120;
+  const level      = getBatteryLevel();
 
-    // 2. Determine Frame Index
-    let frameIndex;
-        if (playerJumpHeight > 0) {
-      // 1. Calculate how far we are into the jump (0.0 to 1.0)
-      // We use playerJumpHeight / peakJumpHeight (assuming 300 is max height)
-      const peakJumpHeight = 300; 
-      const progress = Math.min(1, Math.abs(playerJumpHeight) / peakJumpHeight); 
-      
-      // 2. Logic: 
-      // Ascent (0.0 to 1.0 height): Map to frames 5, 6, 7 (index 5-7)
-      // Descent (1.0 to 0.0 height): Map to frames 8, 9 (index 8-9)
-      
-      // Determine if we are going up (positive velocity) or down (negative)
-      const isAscending = playerJumpVelocity > 0;
-      
-      if (isAscending) {
-        // Map 0.0-1.0 height to index 5, 6, 7
-        frameIndex = 5 + Math.floor(progress * 2.99);
-      } else {
-        // Map 1.0-0.0 height to index 8, 9
-        // We invert the progress so as we go down, we advance through frames 8 and 9
-        const descentProgress = 1 - progress;
-        frameIndex = 8 + Math.floor(descentProgress * 1.99);
-      }
-      
-      // Safety: Ensure it stays within range [5, 9]
-      frameIndex = Math.max(5, Math.min(9, frameIndex));
+  // Row = battery tier
+  let row = 0;
+  if      (level < 0.25) row = 2;
+  else if (level < 0.50) row = 2;
+  else if (level < 0.75) row = 1;
+  else                   row = 0;
+
+  // Frame index
+  let frameIndex;
+  if (playerJumpHeight > 0) {
+    const peakJumpHeight = 300;
+    const progress       = Math.min(1, Math.abs(playerJumpHeight) / peakJumpHeight);
+    const isAscending    = playerJumpVelocity > 0;
+
+    if (isAscending) {
+      frameIndex = 5 + Math.floor(progress * 2.99);
     } else {
-      // RUN ANIMATION (already works correctly with looping)
-      const level = getBatteryLevel();
-      const speed = getBatterySpeed(level);
-      const animationSpeed = Math.max(50, 150 / (speed * 0.5));
-      frameIndex = Math.floor(Date.now() / animationSpeed) % 5;
+      const descentProgress = 1 - progress;
+      frameIndex = 8 + Math.floor(descentProgress * 1.99);
     }
+    frameIndex = Math.max(5, Math.min(9, frameIndex));
+  } else {
+    const speed        = getBatterySpeed(level);
+    const animSpeed    = Math.max(50, 150 / (speed * 0.5));
+    frameIndex         = Math.floor(Date.now() / animSpeed) % 5;
+  }
 
-    // 3. Perspective & Position
-    const scale = 0.5 + (playerVisualZ * 0.5);
-    const drawSize = 250 * scale; 
-    const pScreenX = (canvasWidth / 2 + CAMERA_X_OFFSET) + (playerVisualX * scale);
-    const pScreenY = horizonY + ((canvasHeight - horizonY) * playerVisualZ) - (drawSize / 2) - playerJumpHeight;
+  // Screen position
+  const scale    = 0.5 + playerVisualZ * 0.5;
+  const drawSize = 250 * scale;
+  const pScreenX = (canvasWidth / 2 + CAMERA_X_OFFSET) + playerVisualX * scale;
+  const pScreenY = horizonY + (canvasHeight - horizonY) * playerVisualZ - drawSize / 2 - playerJumpHeight;
 
-    // 4. Draw jump shadow
-    if (playerJumpHeight > 0) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-      ctx.beginPath();
-      ctx.ellipse(pScreenX, horizonY + ((canvasHeight - horizonY) * playerVisualZ) + (drawSize/2), 18 * scale, 7 * scale, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // 5. Draw the cropped frame using row * FRAME_SIZE for Y offset
-    ctx.drawImage(
-      playerAsset, 
-      frameIndex * FRAME_SIZE, row * FRAME_SIZE, // Source X, Y (row offset)
-      FRAME_SIZE, FRAME_SIZE,                    // Source Width, Height
-      pScreenX - (250 / 2), pScreenY, 250, 250   // Dest
+  // Jump shadow
+  if (playerJumpHeight > 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(
+      pScreenX,
+      horizonY + (canvasHeight - horizonY) * playerVisualZ + drawSize / 2,
+      18 * scale, 7 * scale, 0, 0, Math.PI * 2
     );
+    ctx.fill();
   }
-  
-  // Draw the HUD
-  renderHUD();
-}
 
-/**
- * Renders the Heads-Up Display (HUD) showing game statistics.
- * Displays score, battery level, and current velocity in the top corners.
- */
-export function setRendererConfig(config) {
-  if (config.scrollSpeed !== undefined) SCROLL_SPEED = config.scrollSpeed;
-  if (config.cameraX !== undefined) CAMERA_X_OFFSET = config.cameraX;
-  if (config.horizonY !== undefined) HORIZON_Y = config.horizonY;
-  if (config.trackHalf !== undefined) TRACK_HALF_WIDTH = config.trackHalf;
-}
-
-function renderHUD() {
-  const level = getBatteryLevel();
-  const speed = getBatterySpeed(level);
-  const percent = Math.round(level * 100);
-
-  ctx.fillStyle = 'white';
-  ctx.font = '24px monospace';
-  ctx.textAlign = 'left';
-
-  // Draw Score
-  ctx.fillText(`SCORE: ${Math.floor(score)}`, 20, 40);
-  
-  // Draw High Score
-  ctx.fillStyle = '#f0c040';
-  ctx.font = '16px monospace';
-  ctx.fillText(`HI-SCORE: ${Math.floor(highScore)}`, 20, 65);
-
-  // ── NEW: VISUAL PAUSE BUTTON ──
-  // Drawn exactly in the top-center where the mobile tap zone is looking
-  ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.7)'; // Slightly transparent white
-  ctx.font = '20px monospace';
-  ctx.fillText('[ || PAUSE ]', canvasWidth / 2, 40);
-
-  ctx.textAlign = 'right';
-  ctx.fillStyle = percent <= 20 ? '#ff0055' : '#00ffcc';
-  ctx.font = '24px monospace';
-  ctx.fillText(`BATTERY: ${percent}%`, canvasWidth - 20, 40);
-  ctx.fillText(`VELOCITY: ${speed.toFixed(1)}x`, canvasWidth - 20, 70);
-}
-
-/**
- * Draws the custom menu overlay on Pause with interactive buttons
- */
-function renderPauseScreen() {
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-
-  const settings = loadSettings();
-  const hasTilt = settings.hasTiltSensor;
-
-  ctx.fillStyle = '#f0c040';
-  ctx.font = '40px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('CRITICAL BREAK', canvasWidth / 2, canvasHeight / 2 - 120);
-
-  ctx.fillStyle = 'white';
-  ctx.font = '20px monospace';
-  ctx.fillText(hasTilt ? 'Save, Load, or Change Controls' : 'Save or Load Game', canvasWidth / 2, canvasHeight / 2 - 80);
-  
-  // Draw buttons
-  const buttonWidth = 200;
-  const buttonHeight = 50;
-  const buttonSpacing = 20;
-  const startX = canvasWidth / 2 - buttonWidth / 2;
-  
-  // Calculate total height based on whether controls button is shown
-  const totalButtons = hasTilt ? 4 : 3;
-  const totalHeight = totalButtons * buttonHeight + (totalButtons - 1) * buttonSpacing;
-  let startY = canvasHeight / 2 - totalHeight / 2;
-  
-  // Save Button
-  ctx.fillStyle = pauseButtonState.save ? '#f0c040' : '#1a1a2e';
-  ctx.strokeStyle = '#f0c040';
-  ctx.lineWidth = 2;
-  ctx.fillRect(startX, startY, buttonWidth, buttonHeight);
-  ctx.strokeRect(startX, startY, buttonWidth, buttonHeight);
-  ctx.fillStyle = '#000';
-  ctx.font = '20px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('SAVE GAME', canvasWidth / 2, startY + buttonHeight / 2 + 10);
-
-  // Resume Button
-  startY += buttonHeight + buttonSpacing;
-  ctx.fillStyle = pauseButtonState.resume ? '#f0c040' : '#1a1a2e';
-  ctx.strokeStyle = '#f0c040';
-  ctx.lineWidth = 2;
-  ctx.fillRect(startX, startY, buttonWidth, buttonHeight);
-  ctx.strokeRect(startX, startY, buttonWidth, buttonHeight);
-  ctx.fillStyle = '#000';
-  ctx.font = '20px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('RESUME', canvasWidth / 2, startY + buttonHeight / 2 + 10);
-  
-  // Controls Button (only if tilt sensor detected)
-  if (hasTilt) {
-    startY += buttonHeight + buttonSpacing;
-    const controlText = `CONTROLS: ${settings.controlMethod.toUpperCase()}`;
-    
-    ctx.fillStyle = pauseButtonState.controls ? '#f0c040' : '#1a1a2e';
-    ctx.strokeStyle = '#f0c040';
-    ctx.lineWidth = 2;
-    ctx.fillRect(startX, startY, buttonWidth, buttonHeight);
-    ctx.strokeRect(startX, startY, buttonWidth, buttonHeight);
-    ctx.fillStyle = '#000';
-    ctx.font = '16px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(controlText, canvasWidth / 2, startY + buttonHeight / 2 + 10);
-  }
-  
-  // Load Button
-  startY += buttonHeight + buttonSpacing;
-  ctx.fillStyle = pauseButtonState.load ? '#f0c040' : '#1a1a2e';
-  ctx.strokeStyle = '#f0c040';
-  ctx.lineWidth = 2;
-  ctx.fillRect(startX, startY, buttonWidth, buttonHeight);
-  ctx.strokeRect(startX, startY, buttonWidth, buttonHeight);
-  ctx.fillStyle = '#000';
-  ctx.font = '20px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('LOAD GAME', canvasWidth / 2, startY + buttonHeight / 2 + 10);
-}
-
-/**
- * Renders the game over screen with interactive buttons.
- * Shows a semi-transparent overlay with game over message, final score, and buttons.
- */
-function renderGameOver() {
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-
-  ctx.fillStyle = '#ff0055';  
-  ctx.font = '48px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('CRITICAL FAILURE', canvasWidth / 2, canvasHeight / 2 - 100);
-
-  ctx.fillStyle = 'white';
-  ctx.font = '24px monospace';
-  ctx.fillText(`FINAL SCORE: ${Math.floor(score)}`, canvasWidth / 2, canvasHeight / 2 - 50);
-  
-  ctx.fillStyle = '#f0c040';
-  ctx.font = '20px monospace';
-  ctx.fillText(`BEST RECORD: ${Math.floor(highScore)}`, canvasWidth / 2, canvasHeight / 2 - 10);
-  
-  // Draw buttons
-  const buttonWidth = 200;
-  const buttonHeight = 50;
-  const buttonSpacing = 20;
-  const startX = canvasWidth / 2 - buttonWidth / 2;
-  const startY = canvasHeight / 2 + 20;
-  
-  // Restart Button
-  ctx.fillStyle = gameOverButtonState.restart ? '#f0c040' : '#1a1a2e';
-  ctx.strokeStyle = '#f0c040';
-  ctx.lineWidth = 2;
-  ctx.fillRect(startX, startY, buttonWidth, buttonHeight);
-  ctx.strokeRect(startX, startY, buttonWidth, buttonHeight);
-  ctx.fillStyle = '#000';
-  ctx.font = '20px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('RESTART', canvasWidth / 2, startY + buttonHeight / 2 + 10);
-  
-  // Load Button
-  ctx.fillStyle = gameOverButtonState.load ? '#f0c040' : '#1a1a2e';
-  ctx.strokeStyle = '#f0c040';
-  ctx.lineWidth = 2;
-  ctx.fillRect(startX, startY + buttonHeight + buttonSpacing, buttonWidth, buttonHeight);
-  ctx.strokeRect(startX, startY + buttonHeight + buttonSpacing, buttonWidth, buttonHeight);
-  ctx.fillStyle = '#000';
-  ctx.font = '20px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('LOAD GAME', canvasWidth / 2, startY + buttonHeight + buttonSpacing + buttonHeight / 2 + 10);
+  ctx.drawImage(
+    playerAsset,
+    frameIndex * FRAME_SIZE, row * FRAME_SIZE,
+    FRAME_SIZE, FRAME_SIZE,
+    pScreenX - 125, pScreenY, 250, 250
+  );
 }
