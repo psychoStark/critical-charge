@@ -243,7 +243,7 @@ export function renderPauseScreen(score, highScore) {
   const totalBtnH  = btnCount * BH + (btnCount - 1) * GAP;
 
   // Panel sizing
-  const PW = 300, PH = totalBtnH + 140;
+  const PW = 300, PH = totalBtnH + 200;
   const PX = _W / 2 - PW / 2;
   const PY = _H / 2 - PH / 2;
 
@@ -278,6 +278,8 @@ export function renderPauseScreen(score, highScore) {
   const BX = _W / 2 - BW / 2;
 
   _drawButton('▶  RESUME',          BX, BY, BW, BH, _onResume);
+  BY += BH + GAP;
+  _drawButton('🔄  RESTART',       BX, BY, BW, BH, _onRestart, 'hot'); 
   BY += BH + GAP;
   _drawButton('💾  SAVE GAME',      BX, BY, BW, BH, _onSave,   'dim');
   BY += BH + GAP;
