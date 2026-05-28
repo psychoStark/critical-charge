@@ -4,7 +4,7 @@
 // HUD (score, battery, pause button) is delegated to src/ui/hud.js
 // Input is read from src/core/input.js — this file never touches event listeners.
 
-import { getBatteryLevel, getBatterySpeed }             from './battery.js';
+import { getBatteryLevel, getBatterySpeed }              from './battery.js';
 import { assetCache }                                    from '../systems/asset-cache.js';
 import { inputState, getControlMethod,
          checkTiltSensor, setControlMethod }             from './input.js';
@@ -16,9 +16,21 @@ import { initScreens,
          renderGameOverScreen  as _renderGameOver,
          clearScreenButtons,
          triggerSaveMessage,
-         renderSaveOverlay }                     from '../ui/screens.js';
-import { initHUD,
-         renderHUD             as _renderHUD }           from '../ui/hud.js';
+         renderSaveOverlay }                             from '../ui/screens.js';
+import { initHUD, renderHUD    as _renderHUD }           from '../ui/hud.js';
+import { resetScore, 
+         updateScore, 
+         getCurrentScore, 
+         getSessionHighScore, 
+         finalizeScore, 
+         setScore }                                      from '../systems/score.js';
+import { applyGravity, checkCollision }                  from './physics.js';
+import { lerp }                                          from '../utils/lerp.js';
+import { resetObstacles, 
+         spawnRandomObstacle, 
+         updateAndGetObstacles, 
+         setObstacles }                                  from '../systems/obstacle-manager.js';
+import { resetPlayer, updatePlayer, renderPlayer, getPlayerJumpHeight } from './player.js';
 
 // ── Canvas / context ─────────────────────────────────────────────────────────
 let ctx;
@@ -58,12 +70,6 @@ export function setSpawnRate(rate) { SPAWN_RATE = rate; }
 let trackPosition      = 0;
 let lastTime           = 0;
 let obstacles          = [];
-let playerVisualX      = 0;
-let playerVisualZ      = 0.75;
-let playerJumpHeight   = 0;
-let playerJumpVelocity = 0;
-let score              = 0;
-let highScore          = 0;
 let isGameOver         = false;
 let isPaused           = false;
 
@@ -87,7 +93,7 @@ export function startEngine(canvasParam) {
       console.log('[Engine] Toggling control method from', getControlMethod(), 'to', next);
       setControlMethod(next);
       // Re-render pause screen to reflect updated control method label
-      _renderPause(score, highScore);
+      _renderPause(getCurrentScore(), getSessionHighScore());
     },
   });
   // Ensure no stale button registrations persist across restarts
@@ -99,16 +105,14 @@ export function startEngine(canvasParam) {
   });
 
   // Reset all game state
-  highScore          = getHighScore();
-  score              = 0;
+  resetScore();
   isGameOver         = false;
   isPaused           = false;
+  resetObstacles();
   obstacles          = [];
   trackPosition      = 0;
   spawnTimer         = 0;
-  playerVisualX      = 0;
-  playerJumpHeight   = 0;
-  playerJumpVelocity = 0;
+  resetPlayer();
   HORIZON_Y          = canvasHeight / 2 - 200;
 
   lastTime = performance.now();
@@ -172,36 +176,36 @@ export function togglePause() {
   console.log('[Engine] togglePause new isPaused state', isPaused);
   if (isPaused) {
     // Render pause overlay immediately when pausing
-    _renderPause(score, highScore);
+    _renderPause(getCurrentScore(), getSessionHighScore());
   } else {
-    // Clear any lingering UI buttons from pause screen
     clearScreenButtons();
-    lastTime = performance.now(); // prevent dt spike on resume
+    lastTime = performance.now(); 
     requestAnimationFrame(gameLoop);
   }
 }
 
 export function saveGame() {
-  saveGameData(score, trackPosition, obstacles);
+  saveGameData(getCurrentScore(), trackPosition, obstacles); 
   console.log('Game saved.');
   triggerSaveMessage();
-  // Re-render pause screen to display the save success overlay
-  _renderPause(score, highScore);
+  _renderPause(getCurrentScore(), getSessionHighScore());
 }
 
 export function loadSavedGame() {
   const data = loadSavedGameData();
   if (!data) { console.warn('No save file found.'); return; }
-  score         = data.score;
+  setScore(data.score);
+  
   trackPosition = data.trackPosition;
-  obstacles     = data.obstacles;
+  
+  // Send the loaded obstacles into the manager!
+  setObstacles(data.obstacles); 
+  obstacles = data.obstacles; // Keep our local rendering reference updated
+  
   isGameOver    = false;
-  // Immediately resume after loading; no need for pause button
   isPaused      = false;
-  // Clear any lingering UI button registrations (e.g., from pause or game‑over screens)
   clearScreenButtons();
   lastTime      = performance.now();
-  // Render one frame then continue game loop
   render();
   requestAnimationFrame(gameLoop);
 }
@@ -209,19 +213,17 @@ export function loadSavedGame() {
 // ── Main loop ─────────────────────────────────────────────────────────────────
 function gameLoop(time) {
   if (isGameOver) {
-    checkAndSaveHighScore(score);
-    highScore = getHighScore();
-    _renderGameOver(score, highScore, checkAndSaveHighScore(score));
+    const isNewRecord = finalizeScore(); // Handles the checking and saving automatically!
+    _renderGameOver(getCurrentScore(), getSessionHighScore(), isNewRecord);
     return; // stop scheduling
   }
 
   if (isPaused) {
-    // Continuously render pause overlay to allow UI updates (e.g., save success message)
-    _renderPause(score, highScore);
-    // Render save overlay on top of pause screen
+    // Continuously render pause overlay to allow UI updates
+    _renderPause(getCurrentScore(), getSessionHighScore()); // Updated to use getCurrentScore()
     renderSaveOverlay();
     requestAnimationFrame(gameLoop);
-    return; // keep scheduling while paused
+    return;
   }
 
   const dt = Math.min((time - lastTime) / 1000, 0.05); // cap dt at 50ms
@@ -239,64 +241,39 @@ function update(dt) {
   const speed = getBatterySpeed(level);
 
   trackPosition += speed * dt * 50;
-  score         += speed * dt * 10;
+  updateScore(dt, speed);
 
-  // ── Jump trigger ──
-  if (inputState.jumpTriggered && playerJumpHeight <= 0) {
-    playerJumpVelocity = JUMP_FORCE;
-  }
-  inputState.jumpTriggered = false; // consume each frame
-
-  // ── Lane control ──
+  // ── Player Update (Managed by player.js) ──
+  
+  // Handle Tilt Input logic
   if (getControlMethod() === 'tilt') {
     const TILT_THRESHOLD = 0.2;
-    if (Math.abs(inputState.tiltX) > TILT_THRESHOLD) {
-      inputState.lane = inputState.tiltX > 0 ? 1 : -1;
-    } else {
-      // Reset to middle lane when tilt is neutral
-      inputState.lane = 0;
-    }
-    // Diagnostic logging
-    if (typeof window !== 'undefined' && window.__SHOW_DEBUG) {
-      console.log('[Engine] tiltX:', inputState.tiltX.toFixed(3), 'lane:', inputState.lane);
-    }
-  }
-  // Swipe mode: inputState.lane is already set by input.js event handlers
-
-  // ── Jump physics ──
-  if (playerJumpHeight >= 0) {
-    playerJumpHeight   += playerJumpVelocity * dt;
-    playerJumpVelocity += GRAVITY * dt;
-    if (playerJumpHeight < 0) {
-      playerJumpHeight   = 0;
-      playerJumpVelocity = 0;
-    }
+    inputState.lane = Math.abs(inputState.tiltX) > TILT_THRESHOLD ? (inputState.tiltX > 0 ? 1 : -1) : 0;
   }
 
-  // ── Obstacle spawning ──
+  // Update the player's physics and positioning
+  const laneWidth = TRACK_HALF_WIDTH * 0.9;
+  updatePlayer(dt, inputState.lane, laneWidth, inputState.jumpTriggered, JUMP_FORCE, GRAVITY);
+  
+  inputState.jumpTriggered = false; // consume jump input each frame AFTER player.js reads it
+
+  // ── Obstacle spawning (Managed by obstacle-manager.js) ──
   spawnTimer += dt * speed;
   if (spawnTimer > SPAWN_RATE) {
-    obstacles.push({
-      z:    5.0,
-      lane: Math.floor(Math.random() * 3) - 1,
-      type: 'barricade',
-    });
+    spawnRandomObstacle(5.0); // Spawns an obstacle at Z = 5.0
     spawnTimer = 0;
   }
 
-  // ── Move obstacles + collision ──
+  // ── Move obstacles ──
+  obstacles = updateAndGetObstacles(dt, speed);
+
+  // ── Collision Check ──
+  const currentJumpHeight = getPlayerJumpHeight(); // Grab the height from player.js
+  
   for (let i = obstacles.length - 1; i >= 0; i--) {
-    obstacles[i].z -= dt * speed * 0.4;
-
-    // Collision window
-    if (obstacles[i].z < 0.08 && obstacles[i].z > 0.02) {
-      if (obstacles[i].lane === inputState.lane && playerJumpHeight < 50) {
-        isGameOver = true;
-      }
-    }
-
-    if (obstacles[i].z < 0.02) {
-      obstacles.splice(i, 1);
+    if (checkCollision(obstacles[i], inputState.lane, currentJumpHeight, 50)) {
+      isGameOver = true;
+      console.log("CRASH! Game Over.");
     }
   }
 }
@@ -308,14 +285,19 @@ function render() {
 
   _renderRoad();
   _renderObstacles();
-  _renderPlayer();
-
-  // Delegate HUD to hud.js (draws score, battery, pause button, critical flash)
+  
+  // REPLACE the old _renderPlayer() call with this:
+  const playerAsset = assetCache['player'];
   const level = getBatteryLevel();
   const speed = getBatterySpeed(level);
-  _renderHUD(score, highScore, level, speed);
-  // Render save success overlay if active (desktop view)
+  
+  // This new function handles the sprite math, animation, and drawing
+  renderPlayer(ctx, playerAsset, canvasWidth, canvasHeight, HORIZON_Y, CAMERA_X_OFFSET, level, speed);
+
+  // Delegate HUD to hud.js
+  _renderHUD(getCurrentScore(), getSessionHighScore(), level, speed);
   renderSaveOverlay();
+
 
   // ── Debug: show key-press indicator ────────────────────────
   if (typeof window !== 'undefined' && window.__SHOW_DEBUG && _debugKeyPress && Date.now() - _debugKeyTime < 1500) {
@@ -343,14 +325,17 @@ function _renderRoad() {
     const isDark    = Math.floor(textureY / 40) % 2 === 0;
     const cx        = canvasWidth / 2 + CAMERA_X_OFFSET;
     const rw        = roadWidth / 2;
+    const stripeWidth = 8 * scale;
 
     ctx.fillStyle = isDark ? '#111115' : '#1a1a20';
     ctx.fillRect(cx - rw, y, roadWidth, step);
 
     // Purple edge stripes
     ctx.fillStyle = isDark ? '#8000ff' : '#333333';
-    ctx.fillRect(cx - rw - 15, y, 15, step);
-    ctx.fillRect(cx + rw,      y, 15, step);
+    // Draw left stripe
+    ctx.fillRect(cx - rw - stripeWidth, y, stripeWidth, step);
+    // Draw right stripe
+    ctx.fillRect(cx + rw, y, stripeWidth, step);
   }
 }
 
@@ -390,7 +375,7 @@ function _renderPlayer() {
   const horizonY  = HORIZON_Y;
   const laneWidth = TRACK_HALF_WIDTH * 0.9;
   const targetX   = inputState.lane * laneWidth;
-  playerVisualX  += (targetX - playerVisualX) * 0.25;
+  playerVisualX   = lerp(playerVisualX, targetX, 0.25);
 
   const playerAsset = assetCache['player'];
   if (!playerAsset) return;

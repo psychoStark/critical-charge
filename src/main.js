@@ -9,6 +9,7 @@ import { initInput, checkTiltSensor,
          setControlMethod }                    from './core/input.js';
 import { loadSettings, saveSettings }          from './systems/settings.js';
 import { initScreens, renderUnsupportedScreen }from './ui/screens.js';
+import { initScore }                           from './systems/score.js';
 
 // ── Canvas setup — fixed internal resolution ─────────────────────────────────
 const canvas        = document.getElementById('game');
@@ -62,6 +63,7 @@ async function boot() {
    saveSettings(settings);
 
    // ── 6. CONTROL SELECTION or DIRECT LAUNCH ────────────────────────────────
+   initScore();
    if (hasTiltSensor) {
      showControlSelectScreen(canvas);
    } else {
