@@ -24,7 +24,7 @@ import { resetScore,
          getSessionHighScore, 
          finalizeScore, 
          setScore }                                      from '../systems/score.js';
-import { applyGravity, checkCollision }                  from './physics.js';
+import { applyGravity, checkAllCollisions }              from './physics.js';
 import { lerp }                                          from '../utils/lerp.js';
 import { resetObstacles, 
          spawnRandomObstacle, 
@@ -253,7 +253,13 @@ function update(dt) {
 
   // Update the player's physics and positioning
   const laneWidth = TRACK_HALF_WIDTH * 0.9;
-  updatePlayer(dt, inputState.lane, laneWidth, inputState.jumpTriggered, JUMP_FORCE, GRAVITY);
+  updatePlayer(
+    dt, 
+    inputState.lane, 
+    laneWidth, 
+    inputState.jumpTriggered, 
+    getBatteryLevel() // Pass current battery level
+  );
   
   inputState.jumpTriggered = false; // consume jump input each frame AFTER player.js reads it
 
@@ -268,13 +274,11 @@ function update(dt) {
   obstacles = updateAndGetObstacles(dt, speed);
 
   // ── Collision Check ──
-  const currentJumpHeight = getPlayerJumpHeight(); // Grab the height from player.js
+  const currentJumpHeight = getPlayerJumpHeight();
   
-  for (let i = obstacles.length - 1; i >= 0; i--) {
-    if (checkCollision(obstacles[i], inputState.lane, currentJumpHeight, 50)) {
-      isGameOver = true;
-      console.log("CRASH! Game Over.");
-    }
+  if (checkAllCollisions(obstacles, inputState.lane, currentJumpHeight)) {
+    isGameOver = true;
+    console.log("CRASH! Game Over.");
   }
 }
 
@@ -368,70 +372,4 @@ function _renderObstacles() {
       );
     }
   }
-}
-
-// ── Player ────────────────────────────────────────────────────────────────────
-function _renderPlayer() {
-  const horizonY  = HORIZON_Y;
-  const laneWidth = TRACK_HALF_WIDTH * 0.9;
-  const targetX   = inputState.lane * laneWidth;
-  playerVisualX   = lerp(playerVisualX, targetX, 0.25);
-
-  const playerAsset = assetCache['player'];
-  if (!playerAsset) return;
-
-  const FRAME_SIZE = 120;
-  const level      = getBatteryLevel();
-
-  // Row = battery tier
-  let row = 0;
-  if      (level < 0.25) row = 2;
-  else if (level < 0.50) row = 2;
-  else if (level < 0.75) row = 1;
-  else                   row = 0;
-
-  // Frame index
-  let frameIndex;
-  if (playerJumpHeight > 0) {
-    const peakJumpHeight = 300;
-    const progress       = Math.min(1, Math.abs(playerJumpHeight) / peakJumpHeight);
-    const isAscending    = playerJumpVelocity > 0;
-
-    if (isAscending) {
-      frameIndex = 5 + Math.floor(progress * 2.99);
-    } else {
-      const descentProgress = 1 - progress;
-      frameIndex = 8 + Math.floor(descentProgress * 1.99);
-    }
-    frameIndex = Math.max(5, Math.min(9, frameIndex));
-  } else {
-    const speed        = getBatterySpeed(level);
-    const animSpeed    = Math.max(50, 150 / (speed * 0.5));
-    frameIndex         = Math.floor(Date.now() / animSpeed) % 5;
-  }
-
-  // Screen position
-  const scale    = 0.5 + playerVisualZ * 0.5;
-  const drawSize = 250 * scale;
-  const pScreenX = (canvasWidth / 2 + CAMERA_X_OFFSET) + playerVisualX * scale;
-  const pScreenY = horizonY + (canvasHeight - horizonY) * playerVisualZ - drawSize / 2 - playerJumpHeight;
-
-  // Jump shadow
-  if (playerJumpHeight > 0) {
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    ctx.beginPath();
-    ctx.ellipse(
-      pScreenX,
-      horizonY + (canvasHeight - horizonY) * playerVisualZ + drawSize / 2,
-      18 * scale, 7 * scale, 0, 0, Math.PI * 2
-    );
-    ctx.fill();
-  }
-
-  ctx.drawImage(
-    playerAsset,
-    frameIndex * FRAME_SIZE, row * FRAME_SIZE,
-    FRAME_SIZE, FRAME_SIZE,
-    pScreenX - 125, pScreenY, 250, 250
-  );
 }

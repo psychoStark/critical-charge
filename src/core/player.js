@@ -19,16 +19,35 @@ export function resetPlayer() {
 }
 
 /**
+ * Calculates physical modifiers based on battery level.
+ */
+export function getPhysicsModifiers(level) {
+  // 100-75%: Heavy (High gravity, low jump)
+  // 50-75%: Medium
+  // 25-50%: Light
+  // 0-25%: Ultra-light
+  
+  if (level >= 0.75) return { gravity: -4250, jump: 750 };
+  if (level >= 0.50) return { gravity: -4000, jump: 1300 };
+  if (level >= 0.25) return { gravity: -3750, jump: 1400 };
+  return { gravity: -3750, jump: 1500 };
+}
+
+
+/**
  * Updates player physics, lane positioning, and jumping.
  */
-export function updatePlayer(dt, targetLane, laneWidth, jumpTriggered, jumpForce, gravity) {
+export function updatePlayer(dt, targetLane, laneWidth, jumpTriggered, batteryLevel) {
+  // Get the dynamic gravity and jump force based on the current battery level!
+  const { gravity, jump } = getPhysicsModifiers(batteryLevel);
+
   // 1. Lane Movement (Smooth sliding)
   const targetX = targetLane * laneWidth;
   x = lerp(x, targetX, 0.25);
 
   // 2. Jump Trigger
   if (jumpTriggered && jumpHeight <= 0) {
-    jumpVelocity = jumpForce;
+    jumpVelocity = jump; // Use the dynamic jump force we just calculated
   }
 
   // 3. Jump Physics
@@ -89,7 +108,7 @@ export function renderPlayer(ctx, asset, canvasWidth, canvasHeight, horizonY, ca
     ctx.ellipse(
       pScreenX,
       horizonY + (canvasHeight - horizonY) * z + drawSize / 2,
-      18 * scale, 7 * scale, 0, 0, Math.PI * 2
+      55 * scale, 7 * scale, 0, 0, Math.PI * 2
     );
     ctx.fill();
   }
