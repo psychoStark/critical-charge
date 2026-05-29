@@ -1,12 +1,16 @@
 // src/core/player.js
 import { applyGravity } from './physics.js';
 import { lerp } from '../utils/lerp.js';
+import { playSound } from '../systems/audio.js';
+import { hapticJump, hapticLand, hapticMove } from '../systems/haptics.js';
+import { drawShadow, drawScaledSprite } from './renderer.js';
 
 // ── Player State ──
 let x = 0;
 let z = 0.75;
 let jumpHeight = 0;
 let jumpVelocity = 0;
+let currentLane = 0;
 
 // Config
 const FRAME_SIZE = 120;
@@ -16,6 +20,7 @@ export function resetPlayer() {
   x = 0;
   jumpHeight = 0;
   jumpVelocity = 0;
+  currentLane = 0;
 }
 
 /**
@@ -41,20 +46,51 @@ export function updatePlayer(dt, targetLane, laneWidth, jumpTriggered, batteryLe
   // Get the dynamic gravity and jump force based on the current battery level!
   const { gravity, jump } = getPhysicsModifiers(batteryLevel);
 
+
+  if (targetLane !== currentLane) {
+    hapticMove();
+    currentLane = targetLane;
+  }
+
+  
   // 1. Lane Movement (Smooth sliding)
   const targetX = targetLane * laneWidth;
   x = lerp(x, targetX, 0.25);
 
   // 2. Jump Trigger
   if (jumpTriggered && jumpHeight <= 0) {
-    jumpVelocity = jump; // Use the dynamic jump force we just calculated
+    jumpVelocity = jump; 
+
+    // ── EASY JUMP AUDIO CONFIG ──
+    const PIVOT_BATTERY  = 0.35; // 35% is the middle ground
+    const PITCH_AT_100   = 0.6;  // Deep, heavy sound for full battery
+    const PITCH_AT_PIVOT = 1.0;  // Normal jump sound
+    const PITCH_AT_0     = 1.25;  // High, airy sound for empty battery
+
+    // ── AUTOMATIC MATH ──
+    let jumpPitch;
+    if (batteryLevel >= PIVOT_BATTERY) {
+      const progress = (1.0 - batteryLevel) / (1.0 - PIVOT_BATTERY);
+      jumpPitch = PITCH_AT_100 + (progress * (PITCH_AT_PIVOT - PITCH_AT_100));
+    } else {
+      const progress = (PIVOT_BATTERY - batteryLevel) / PIVOT_BATTERY;
+      jumpPitch = PITCH_AT_PIVOT + (progress * (PITCH_AT_0 - PITCH_AT_PIVOT));
+    }
+
+    // Play the sound with standard volume (1.0), but dynamic pitch!
+    playSound('jump', 1.0, jumpPitch); 
+    hapticJump();
   }
 
   // 3. Jump Physics
+  const wasInAir = jumpHeight > 0;
   if (jumpHeight >= 0) {
     const physicsState = applyGravity(jumpHeight, jumpVelocity, gravity, dt);
     jumpHeight = physicsState.height;
     jumpVelocity = physicsState.velocity;
+  }
+  if (wasInAir && jumpHeight <= 0) {
+    hapticLand();
   }
 }
 
@@ -69,11 +105,15 @@ export function renderPlayer(ctx, asset, canvasWidth, canvasHeight, horizonY, ca
   if (!asset) return;
 
   // 1. Determine Animation Row (Battery Tier)
+  // Note: Arrays/Rows are 0-indexed, so Row 1 = 0, Row 4 = 3, etc.
   let row = 0;
-  if      (batteryLevel < 0.25) row = 2;
-  else if (batteryLevel < 0.50) row = 2;
-  else if (batteryLevel < 0.75) row = 1;
-  else                          row = 0;
+  
+  if      (batteryLevel <= 0.15) row = 5; // Row 6: < 15%
+  else if (batteryLevel <= 0.20) row = 4; // Row 5: 15% - 20%
+  else if (batteryLevel <= 0.25) row = 3; // Row 4: 20% - 25%
+  else if (batteryLevel <= 0.50) row = 2; // Row 3: 25% - 50%
+  else if (batteryLevel <= 0.75) row = 1; // Row 2: 50% - 75%
+  else                           row = 0; // Row 1: 75% - 100%
 
   // 2. Determine Animation Column (Frame Index)
   let frameIndex;
@@ -97,27 +137,19 @@ export function renderPlayer(ctx, asset, canvasWidth, canvasHeight, horizonY, ca
 
   // 3. Perspective Math
   const scale = 0.5 + (z * 0.5);
-  const drawSize = 250 * scale;
+  const drawSize = 350 * scale;
   const pScreenX = (canvasWidth / 2 + cameraX) + x * scale;
-  const pScreenY = horizonY + (canvasHeight - horizonY) * z - drawSize / 2 - jumpHeight;
+  const pScreenY = horizonY + (canvasHeight - 250) * z - jumpHeight;
 
-  // 4. Draw Shadow
+  // 4. Draw Shadow (using renderer utility)
   if (jumpHeight > 0) {
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    ctx.beginPath();
-    ctx.ellipse(
-      pScreenX,
-      horizonY + (canvasHeight - horizonY) * z + drawSize / 2,
-      55 * scale, 7 * scale, 0, 0, Math.PI * 2
-    );
-    ctx.fill();
+    drawShadow(ctx, pScreenX, horizonY + (canvasHeight - horizonY) * z + drawSize / 2, scale);
   }
 
-  // 5. Draw Player Sprite
-  ctx.drawImage(
-    asset,
-    frameIndex * FRAME_SIZE, row * FRAME_SIZE,
-    FRAME_SIZE, FRAME_SIZE,
-    pScreenX - 125, pScreenY, 250, 250
+  // 5. Draw Player Sprite (using renderer utility)
+  drawScaledSprite(
+    ctx, asset, 
+    frameIndex * FRAME_SIZE, row * FRAME_SIZE, FRAME_SIZE, 
+    pScreenX, pScreenY, drawSize, drawSize
   );
 }
