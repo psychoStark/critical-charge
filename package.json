@@ -1,8 +1,5 @@
 {
-  "name": "critical-charge",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "version": "0.0.0-dev",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

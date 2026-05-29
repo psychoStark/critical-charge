@@ -9,7 +9,8 @@ const DEFAULT_SETTINGS = {
     hasTiltSensor: false,
     tiltSensitivity: 0.03,
     swipeThreshold: 30,
-    deadzone: 0.05
+    deadzone: 0.05,
+    isMuted: false
 };
 
 /**

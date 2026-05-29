@@ -43,3 +43,14 @@ export function loadSavedGameData() {
     return null;
   }
 }
+
+// ── PUNISHMENT MECHANICS ──
+export function deleteSavedGame() {
+  localStorage.removeItem(SAVE_SLOT_KEY);
+  console.log('💀 W.I.R.U.S. activated: Manual save deleted.');
+}
+
+export function wipeAllData() {
+  localStorage.clear();
+  console.log('💥 CATASTROPHIC FAILURE: All local storage wiped.');
+}

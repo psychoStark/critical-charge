@@ -10,6 +10,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { loadSettings } from '../systems/settings.js';
+import { playSound } from '../systems/audio.js';
+import { hapticTap } from '../systems/haptics.js';
 
 // ── Theme tokens ─────────────────────────────────────────────────────────────
 const T = {
@@ -58,7 +60,10 @@ let _onRestart = () => {};
 let _onSave    = () => {};
 let _onLoad    = () => {};
 let _onToggleControls = () => {};
+let _onNextSong       = () => {};
+let _onToggleMute     = () => {};
 let _saveMessageTimer = 0; // frames remaining for save success overlay
+let _onTestLab = () => {};
 
 // ── Public init ───────────────────────────────────────────────────────────────
 export function initScreens(canvas, callbacks = {}) {
@@ -72,6 +77,9 @@ export function initScreens(canvas, callbacks = {}) {
   _onSave           = callbacks.onSave           ?? (() => {});
   _onLoad           = callbacks.onLoad           ?? (() => {});
   _onToggleControls = callbacks.onToggleControls ?? (() => {});
+  _onNextSong       = callbacks.onNextSong       ?? (() => {}); 
+  _onToggleMute     = callbacks.onToggleMute     ?? (() => {});
+  _onTestLab        = callbacks.onTestLab        ?? (() => {});
 
   // Single pointer listener on the canvas — handles both mouse and touch
   canvas.addEventListener('pointerdown', _handlePointer);
@@ -99,6 +107,8 @@ function _handlePointer(e) {
     if (x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h) {
       console.log('[Screens] button HIT — firing action');
       e.preventDefault(); // only prevent default if a button is actually hit
+      playSound('click');
+      hapticTap();
       btn.action();
       // Diagnostic: log if restart action was triggered via tap
       if (btn.action === _onRestart) {
@@ -222,7 +232,7 @@ function _drawNoiseBorder(y, w) {
 // ─────────────────────────────────────────────────────────────────────────────
 // PAUSE SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
-export function renderPauseScreen(score, highScore) {
+export function renderPauseScreen(score, highScore, isMuted = false) {
   const ctx  = _ctx;
   _clearButtons();
 
@@ -238,12 +248,12 @@ export function renderPauseScreen(score, highScore) {
   const method   = settings.controlMethod ?? 'swipe';
 
   // How many buttons?
-  const btnCount   = hasTilt ? 4 : 3;  // Save | Resume | Controls? | Load
+  const btnCount   = hasTilt ? 8 : 7;  
   const BW = 220, BH = 48, GAP = 14;
   const totalBtnH  = btnCount * BH + (btnCount - 1) * GAP;
 
   // Panel sizing
-  const PW = 300, PH = totalBtnH + 200;
+  const PW = 300, PH = totalBtnH + 160; // Adjusted padding slightly to fit the tall menu
   const PX = _W / 2 - PW / 2;
   const PY = _H / 2 - PH / 2;
 
@@ -284,11 +294,21 @@ export function renderPauseScreen(score, highScore) {
   _drawButton('💾  SAVE GAME',      BX, BY, BW, BH, _onSave,   'dim');
   BY += BH + GAP;
   _drawButton('📂  LOAD GAME',      BX, BY, BW, BH, _onLoad,   'dim');
+  BY += BH + GAP;
+  _drawButton('▶▶  NEXT TRACK',     BX, BY, BW, BH, _onNextSong,   'dim');
+  BY += BH + GAP;
+  
+  const muteText = isMuted ? '🔊  UNMUTE AUDIO' : '🔇  MUTE AUDIO';
+  _drawButton(muteText,             BX, BY, BW, BH, _onToggleMute, 'dim');
 
   if (hasTilt) {
     BY += BH + GAP;
     _drawButton(`🎮  ${method.toUpperCase()} MODE`, BX, BY, BW, BH, _onToggleControls, 'dim');
   }
+
+  BY += BH + GAP;
+  const testBtnText = window.__TEST_MODE ? '❌  EXIT TEST' : '🧪  TEST MODE';
+  _drawButton(testBtnText,       BX, BY, BW, BH, _onTestLab, 'dim');
 
   // Swipe-down hint
   ctx.fillStyle   = T.textDim;
@@ -426,6 +446,72 @@ export function renderUnsupportedScreen() {
     ctx.fillText('Critical Charge requires a real battery sensor to play.', _W / 2, PY + 138);
     ctx.fillText('iOS Safari and Firefox do not support this API.', _W / 2, PY + 156);
 }
+
+
+// ANTI HACK
+
+export function renderHijackedScreen() {
+  const ctx = _canvas.getContext('2d');
+  const _W = _canvas.width;
+  const _H = _canvas.height;
+
+  // ── Blinking Red/Black Background ──
+  // Math.floor(Date.now() / 300) toggles true/false every 300 milliseconds
+  const isRed = Math.floor(Date.now() / 300) % 2 === 0;
+  ctx.fillStyle = isRed ? 'rgba(255, 0, 0, 0.4)' : '#050000';
+  ctx.fillRect(0, 0, _W, _H);
+
+  // Warning Box
+  const boxW = 340, boxH = 200;
+  const boxX = _W / 2 - boxW / 2;
+  const boxY = _H / 2 - boxH / 2 - 50;
+
+  ctx.fillStyle = '#1a0000';
+  ctx.strokeStyle = '#ff0000';
+  ctx.lineWidth = 3;
+  ctx.fillRect(boxX, boxY, boxW, boxH);
+  ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ff0000';
+  ctx.font = 'bold 24px monospace';
+  ctx.fillText('SYSTEM HIJACKED', _W / 2, boxY + 50);
+
+  ctx.fillStyle = '#ff6666';
+  ctx.font = '14px monospace';
+  ctx.fillText('Enemy W.I.R.U.S. detected', _W / 2, boxY + 90);
+  ctx.fillText('via power grid.', _W / 2, boxY + 110);
+  
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('Save data purged.', _W / 2, boxY + 140);
+  ctx.fillText('Unplug to reboot from zero.', _W / 2, boxY + 160);
+}
+
+export function renderCorruptedScreen() {
+  const ctx = _canvas.getContext('2d');
+  const _W = _canvas.width;
+  const _H = _canvas.height;
+
+  // Complete blackout with red text
+  ctx.fillStyle = '#050000';
+  ctx.fillRect(0, 0, _W, _H);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ff0000';
+  ctx.font = 'bold 28px monospace';
+  ctx.fillText('CATASTROPHIC FAILURE', _W / 2, _H / 2 - 40);
+
+  ctx.fillStyle = '#ff4444';
+  ctx.font = '14px monospace';
+  ctx.fillText('System fully corrupted by', _W / 2, _H / 2 + 10);
+  ctx.fillText('W.I.R.U.S. payload.', _W / 2, _H / 2 + 30);
+  
+  ctx.fillStyle = '#555555';
+  ctx.fillText('All memory banks wiped.', _W / 2, _H / 2 + 70);
+  ctx.fillText('Awaiting disinfection...', _W / 2, _H / 2 + 90);
+}
+
+
 
 // Exported helper to trigger save success overlay
 export function triggerSaveMessage() {

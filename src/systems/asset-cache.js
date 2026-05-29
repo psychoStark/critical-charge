@@ -3,6 +3,7 @@
 // Handles loading, rasterizing, and caching SVG assets for optimal performance.
 // Pre-rendering SVGs to canvas elements ensures smooth 60 FPS rendering during gameplay.
 
+import { loadSound } from './audio.js';
 /**
  * Cache for storing pre-rendered game assets.
  * Maps asset IDs to canvas elements containing the rasterized images.
@@ -80,5 +81,15 @@ export async function preloadAssets() {
   });
 
   await Promise.allSettled(promises);
-  console.log('✅ Assets cached.');
+  // ── LOAD AUDIO FILES ──
+  loadSound('click', '/src/assets/sounds/click.opus');
+  loadSound('jump', '/src/assets/sounds/jump.opus');
+  loadSound('wirus', '/src/assets/sounds/wirus.opus');
+  loadSound('corrupted', '/src/assets/sounds/corrupted.opus');
+  loadSound('gameover', '/src/assets/sounds/gameover.opus');
+  loadSound('music1', '/src/assets/sounds/music/music1.opus');
+  loadSound('music2', '/src/assets/sounds/music/music2.opus');
+  loadSound('music3', '/src/assets/sounds/music/music3.opus');
+
+  console.log('✅ Assets and Audio cached.');
 }

@@ -10,6 +10,8 @@ import { initInput, checkTiltSensor,
 import { loadSettings, saveSettings }          from './systems/settings.js';
 import { initScreens, renderUnsupportedScreen }from './ui/screens.js';
 import { initScore }                           from './systems/score.js';
+import { playSound }                           from './systems/audio.js';
+import { hapticTap }                           from './systems/haptics.js';
 
 // ── Canvas setup — fixed internal resolution ─────────────────────────────────
 const canvas        = document.getElementById('game');
@@ -21,6 +23,12 @@ canvas.focus();
 // Ensure canvas regains focus on user interaction (tap/click)
 canvas.addEventListener('click', () => canvas.focus());
 canvas.addEventListener('touchstart', () => canvas.focus());
+
+
+// ── Global Test Lab Shortcut (Works instantly on all screens) ──
+window.addEventListener('keydown', e => {
+  if (e.key === '`') window.location.href = '/test.html';
+});
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
 async function boot() {
@@ -277,12 +285,16 @@ function showControlSelectScreen(canvas) {
 
   // ── Button handlers ───────────────────────────────────────────────────────
   document.getElementById('btnSwipe').addEventListener('click', () => {
+    playSound('click');
+    hapticTap();
     setControlMethod('swipe');
     _dismissControlScreen(el, style);
     startEngine(canvas);
   });
 
   document.getElementById('btnTilt').addEventListener('click', () => {
+    playSound('click');
+    hapticTap();
     setControlMethod('tilt');
     _dismissControlScreen(el, style);
     startEngine(canvas);
