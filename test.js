@@ -64,7 +64,7 @@ window.addEventListener('keydown', async (e) => {
   const ctx = canvas.getContext('2d');
 
   if (key === '`') {
-    window.location.href = ',/';  // ── FIX: Go to root (Main Game)
+    window.location.href = './';  // ── FIX: Go to root (Main Game)
     return;
   }
 
