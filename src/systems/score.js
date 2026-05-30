@@ -3,6 +3,7 @@
 // Extracts score tracking logic out of the main engine loop to keep it clean.
 
 import { getHighScore, checkAndSaveHighScore } from './save-system.js';
+import { SCORE_SPEED_MULTIPLIER } from '../constants.js';
 
 // Internal state
 let currentScore = 0;
@@ -17,13 +18,13 @@ export function initScore() {
 }
 
 /**
- * Resets the current score to zero. 
+ * Resets the current score to zero.
  * Call this inside startEngine() when a new game begins.
  */
 export function resetScore() {
   currentScore = 0;
   // Refresh the high score in case it changed during the last run
-  sessionHighScore = getHighScore(); 
+  sessionHighScore = getHighScore();
 }
 
 /**
@@ -34,7 +35,7 @@ export function resetScore() {
  */
 export function updateScore(dt, speed) {
   // Score increases faster when battery is low (speed is high)
-  currentScore += speed * dt * 6;
+  currentScore += speed * dt * SCORE_SPEED_MULTIPLIER;
 }
 
 /**
@@ -63,14 +64,6 @@ export function finalizeScore() {
     sessionHighScore = Math.floor(currentScore);
   }
   return isNewRecord;
-}
-
-/**
- * (Optional for later) Add bonus points instantly.
- * Example: if you add collectible batteries or coins.
- */
-export function addBonusPoints(points) {
-  currentScore += points;
 }
 
 /**

@@ -1,21 +1,21 @@
 // test.js
 
-import { initBattery, setBatteryConfig, MIN_SPEED, MAX_SPEED, SPEED_EXPONENT, getBatteryLevel, getBatterySpeed } from './src/core/battery.js';
+import { initBattery, setBatteryConfig, MIN_SPEED, MAX_SPEED, SPEED_EXPONENT, getBatterySpeed } from './src/core/battery.js';
 import { startEngine, initEngineKeyBindings, setEngineConfig, setSpawnRate, saveGame, loadSavedGame, JUMP_FORCE, GRAVITY, SPAWN_RATE, setForceScreen } from './src/core/engine.js';
 import { preloadAssets } from './src/systems/asset-cache.js';
 import { initInput, inputState, getControlMethod } from './src/core/input.js';
 import { debugLastSound, getMuteState, debugCurrentBGM } from './src/systems/audio.js';
 import { debugLastHaptic } from './src/systems/haptics.js';
-import { initScreens, renderUnsupportedScreen } from './src/ui/screens.js';
+import { initScreens } from './src/ui/screens.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIGURATION & STATE
 // ─────────────────────────────────────────────────────────────────────────────
 const DEFAULT_CONFIG = {
-  batteryLevel: 0.16, 
-  minSpeed: MIN_SPEED, 
-  maxSpeed: MAX_SPEED, 
-  speedExponent: SPEED_EXPONENT, 
+  batteryLevel: 0.16,
+  minSpeed: MIN_SPEED,
+  maxSpeed: MAX_SPEED,
+  speedExponent: SPEED_EXPONENT,
   jumpForce: JUMP_FORCE,
   gravity: GRAVITY,
   spawnRate: SPAWN_RATE,
@@ -38,14 +38,14 @@ let drainInterval = null;
 const batteryListeners = { chargingchange: [], levelchange: [] };
 
 const mockBattery = {
-  get level() { 
-    return (useRealBattery && realBatteryInstance) ? realBatteryInstance.level : CONFIG.batteryLevel; 
+  get level() {
+    return (useRealBattery && realBatteryInstance) ? realBatteryInstance.level : CONFIG.batteryLevel;
   },
-  get charging() { 
-    return (useRealBattery && realBatteryInstance) ? realBatteryInstance.charging : isMockCharging; 
+  get charging() {
+    return (useRealBattery && realBatteryInstance) ? realBatteryInstance.charging : isMockCharging;
   },
   addEventListener: (type, cb) => { if (batteryListeners[type]) batteryListeners[type].push(cb); },
-  removeEventListener: (type, cb) => {},
+  removeEventListener: (_type, _cb) => {},
   dispatchEvent: () => true
 };
 
@@ -62,30 +62,30 @@ window.addEventListener('keydown', async (e) => {
   const key = e.key.toLowerCase();
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
-  
+
   if (key === '`') {
     window.location.href = '/';  // ── FIX: Go to root (Main Game)
     return;
   }
 
-  if (key === 'o') { 
+  if (key === 'o') {
     showDebugPanel = !showDebugPanel;
     const debugPanel = document.getElementById('dev-debug-panel');
     const mobileBar = document.getElementById('mobile-shortcut-bar');
     if (debugPanel) debugPanel.style.display = showDebugPanel ? 'block' : 'none';
-    if (mobileBar) mobileBar.style.display = showDebugPanel ? 'flex' : 'none'; 
+    if (mobileBar) mobileBar.style.display = showDebugPanel ? 'flex' : 'none';
   }
   if (key === 'h') showShortcutsHint = !showShortcutsHint;
   if (key === 'r') startEngine(canvas);
   if (key === 's') saveGame();
   if (key === 'l') loadSavedGame();
-  if (key === 'c') { 
+  if (key === 'c') {
     isMockCharging = !isMockCharging;
     triggerBatteryEvent('chargingchange');
   }
-  
-  if (key === 'k') { 
-    if (useRealBattery) return; 
+
+  if (key === 'k') {
+    if (useRealBattery) return;
     if (CONFIG.batteryLevel <= 0) {
       CONFIG.batteryLevel = 1.0;
       triggerBatteryEvent('levelchange');
@@ -111,33 +111,33 @@ window.addEventListener('keydown', async (e) => {
   // ── FIXED TOGGLE LOGIC ──
   if (key === 'b') {
     useRealBattery = !useRealBattery; // Toggle the state FIRST
-    
+
     if (useRealBattery) {
-      const realBattery = await initBattery(); 
+      const realBattery = await initBattery();
       if (realBattery) {
         realBatteryInstance = realBattery;
-        setForceScreen(null); 
+        setForceScreen(null);
         console.log('[test] Switched to Real API');
       } else {
-        // DO NOT revert useRealBattery to false here! 
+        // DO NOT revert useRealBattery to false here!
         // We leave it true so the button stays lit and the state machine knows we are in the "failed real" state.
-        realBatteryInstance = null; 
-        setForceScreen('unsupported'); 
+        realBatteryInstance = null;
+        setForceScreen('unsupported');
         console.warn('[test] Hardware unsupported');
       }
     } else {
       // Switches cleanly back to mock on the next tap
       await initBattery(mockBattery);
       realBatteryInstance = null;
-      setForceScreen(null); 
+      setForceScreen(null);
       console.log('[test] Switched to Mock');
     }
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     triggerBatteryEvent('levelchange');
   }
-  
-  if (key === 'z') { 
+
+  if (key === 'z') {
     if (drainInterval) clearInterval(drainInterval);
     isAutoDraining = false;
     Object.assign(CONFIG, DEFAULT_CONFIG);
@@ -152,7 +152,7 @@ window.addEventListener('keydown', async (e) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VISUAL DEBUG HARNESS 
+// VISUAL DEBUG HARNESS
 // ─────────────────────────────────────────────────────────────────────────────
 function initVisualDebugger() {
   const panel = document.createElement('div');
@@ -238,14 +238,14 @@ function initVisualDebugger() {
     if (btnK) btnK.style.background = isAutoDraining ? '#d946ef' : '#1e0038';
     const btnH = document.getElementById('btn-shortcut-h');
     if (btnH) btnH.style.background = showShortcutsHint ? '#d946ef' : '#1e0038';
-    
+
     requestAnimationFrame(updateDebugUI);
   }
   requestAnimationFrame(updateDebugUI);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MOBILE TOUCH SHORTCUTS 
+// MOBILE TOUCH SHORTCUTS
 // ─────────────────────────────────────────────────────────────────────────────
 function initMobileShortcuts() {
   const bar = document.createElement('div');
@@ -260,7 +260,7 @@ function initMobileShortcuts() {
     { key: 'b', label: 'B', desc: 'API',   isToggle: true },
     { key: 'c', label: 'C', desc: 'PLUG',  isToggle: true },
     { key: 'k', label: 'K', desc: 'DRAIN', isToggle: true },
-    { key: 'h', label: 'H', desc: 'HINTS', isToggle: true }, 
+    { key: 'h', label: 'H', desc: 'HINTS', isToggle: true },
     { key: 'r', label: 'R', desc: 'RST',   isToggle: false },
     { key: 's', label: 'S', desc: 'SAVE',  isToggle: false },
     { key: 'l', label: 'L', desc: 'LOAD',  isToggle: false },
@@ -269,15 +269,15 @@ function initMobileShortcuts() {
 
   shortcuts.forEach(sc => {
     const btn = document.createElement('button');
-    btn.id = `btn-shortcut-${sc.key}`; 
+    btn.id = `btn-shortcut-${sc.key}`;
     btn.innerHTML = `<strong style="font-size:16px; color:#e9d5ff;">${sc.label}</strong><br><span style="font-size:9px; color:#a78bfa;">${sc.desc}</span>`;
-    btn.style.cssText = `flex: 1; background: #1e0038; border: 1px solid #a855f7; border-radius: 4px; padding: 6px 2px; font-family: 'Courier New', monospace; cursor: pointer; touch-action: manipulation;`;
+    btn.style.cssText = 'flex: 1; background: #1e0038; border: 1px solid #a855f7; border-radius: 4px; padding: 6px 2px; font-family: \'Courier New\', monospace; cursor: pointer; touch-action: manipulation;';
 
     btn.addEventListener('pointerdown', (e) => {
-      e.preventDefault(); 
+      e.preventDefault();
       window.dispatchEvent(new KeyboardEvent('keydown', { key: sc.key }));
       if (!sc.isToggle) {
-        btn.style.background = '#d946ef'; 
+        btn.style.background = '#d946ef';
         setTimeout(() => { btn.style.background = '#1e0038'; }, 150);
       }
     });
@@ -309,10 +309,10 @@ async function boot() {
   await preloadAssets();
   initInput();
   initEngineKeyBindings();
-  
+
   initVisualDebugger();
-  initMobileShortcuts(); 
-  
+  initMobileShortcuts();
+
   canvas.addEventListener('pointerdown', (e) => {
     const rect = canvas.getBoundingClientRect();
     const scale = Math.min(rect.width / canvas.width, rect.height / canvas.height);

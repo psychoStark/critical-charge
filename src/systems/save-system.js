@@ -1,6 +1,8 @@
 // src/systems/save-system.js
 // Manages saving game state and high scores to the browser's LocalStorage.
 
+import { DEBUG } from '../constants.js';
+
 const HIGH_SCORE_KEY = 'critical_charge_highscore';
 const SAVE_SLOT_KEY = 'critical_charge_manual_save';
 
@@ -25,12 +27,12 @@ export function saveGameData(currentScore, trackPosition, obstacles) {
     score: Math.floor(currentScore),
     trackPosition: trackPosition,
     // We sanitize the obstacles array to save only what's necessary
-    obstacles: obstacles.map(obs => ({ z: obs.z, lane: obs.lane, type: obs.type })),
-    timestamp: Date.now()
+    obstacles: obstacles.map((obs) => ({ z: obs.z, lane: obs.lane, type: obs.type })),
+    timestamp: Date.now(),
   };
-  
+
   localStorage.setItem(SAVE_SLOT_KEY, JSON.stringify(saveState));
-  console.log('💾 Game manually saved successfully.');
+  if (DEBUG) console.log('💾 Game manually saved successfully.');
 }
 
 export function loadSavedGameData() {
@@ -47,10 +49,10 @@ export function loadSavedGameData() {
 // ── PUNISHMENT MECHANICS ──
 export function deleteSavedGame() {
   localStorage.removeItem(SAVE_SLOT_KEY);
-  console.log('💀 W.I.R.U.S. activated: Manual save deleted.');
+  if (DEBUG) console.log('💀 W.I.R.U.S. activated: Manual save deleted.');
 }
 
 export function wipeAllData() {
   localStorage.clear();
-  console.log('💥 CATASTROPHIC FAILURE: All local storage wiped.');
+  if (DEBUG) console.log('💥 CATASTROPHIC FAILURE: All local storage wiped.');
 }
