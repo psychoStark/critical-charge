@@ -46,7 +46,7 @@ export const HAPTIC_JUMP_MS = 25;
 export const HAPTIC_LAND_MS = 10;
 export const HAPTIC_MOVE_MS = 8;
 export const HAPTIC_CRASH_PATTERN = [100, 30, 200, 30, 400];
-export const HAPTIC_HIJACKED_INTERVAL = 50; // ms
+export const HAPTIC_HIJACKED_INTERVAL = 300; // ms
 export const HAPTIC_HIJACKED_VIBRATE = 150; // ms
 export const HAPTIC_CORRUPTED_INTERVAL = 250; // ms
 
@@ -89,17 +89,31 @@ export const TILT_NORMALIZE_DEGREES = 45;
 export const TILT_SENSITIVITY_MULT = 60;
 
 // ── ASSET PATHS ──
+// Import the assets directly so Vite knows to bundle them into the dist folder.
+import chargerSpriteUrl from './assets/enemycharger_dynamicgrid.png';
+import playerSpriteUrl from './assets/herosprite_dynamicgrid.png';
+
+import clickSoundUrl from './assets/sounds/click.opus';
+import jumpSoundUrl from './assets/sounds/jump.opus';
+import wirusSoundUrl from './assets/sounds/wirus.opus';
+import corruptedSoundUrl from './assets/sounds/corrupted.opus';
+import gameoverSoundUrl from './assets/sounds/gameover.opus';
+
+import music1Url from './assets/sounds/music/music1.opus';
+import music2Url from './assets/sounds/music/music2.opus';
+import music3Url from './assets/sounds/music/music3.opus';
+
 export const ASSET_PATHS = {
-  chargerSprite: '/src/assets/enemycharger_dynamicgrid.png',
-  playerSprite: '/src/assets/herosprite_dynamicgrid.png',
+  chargerSprite: chargerSpriteUrl,
+  playerSprite: playerSpriteUrl,
   sounds: {
-    click: '/src/assets/sounds/click.opus',
-    jump: '/src/assets/sounds/jump.opus',
-    wirus: '/src/assets/sounds/wirus.opus',
-    corrupted: '/src/assets/sounds/corrupted.opus',
-    gameover: '/src/assets/sounds/gameover.opus',
-    music1: '/src/assets/sounds/music/music1.opus',
-    music2: '/src/assets/sounds/music/music2.opus',
-    music3: '/src/assets/sounds/music/music3.opus',
+    click: clickSoundUrl,
+    jump: jumpSoundUrl,
+    wirus: wirusSoundUrl,
+    corrupted: corruptedSoundUrl,
+    gameover: gameoverSoundUrl,
+    music1: music1Url,
+    music2: music2Url,
+    music3: music3Url,
   },
 };

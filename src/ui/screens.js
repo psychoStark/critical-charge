@@ -460,7 +460,7 @@ export function renderHijackedScreen() {
   ctx.fillText('via power grid.', _W / 2, boxY + 110);
 
   ctx.fillStyle = '#ffffff';
-  ctx.fillText('Save data purged.', _W / 2, boxY + 140);
+  ctx.fillText('Save data at risk.', _W / 2, boxY + 140);
   ctx.fillText('Unplug to reboot from zero.', _W / 2, boxY + 160);
 }
 
