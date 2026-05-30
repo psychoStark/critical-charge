@@ -3,6 +3,7 @@ import basicSsl from '@vitejs/plugin-basic-ssl'
 
 export default defineConfig({
   root: './',
+  base: './',
   build: {
     outDir: 'dist',
     rollupOptions: {
