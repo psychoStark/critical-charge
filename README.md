@@ -2,7 +2,89 @@
 
 <img src="public/favicon.png" alt="Critical Charge Game" width="100">
 
+[![Play on itch.io](https://img.shields.io/badge/Play_on-itch.io-ff0b5f?style=for-the-badge&logo=itch.io&logoColor=white)](https://psychostark.itch.io/critical-charge)
+
+<br>
+
 Welcome to **Critical Charge** - a high-speed endless runner game where your device's battery level determines your speed and physics! The lower your battery, the faster you go and the higher you jump, creating a thrilling challenge that gets harder as you play.
+<br>
+
+## 🚀 Getting Started
+
+### 🌐 Play on the Web
+
+
+* Click the **"Play on itch.io"** button at the top of this page.
+
+<br>
+
+### 📱 Android
+
+
+1. **Download:** Navigate to the [Releases](https://github.com/psychostark/critical-charge/releases) page and download the latest `.apk` file.
+2. **Install:** Tap the file on your Android device to install.
+3. **Security Warning:** Because this game is distributed via GitHub (and not the Google Play Store), Android may display a "Play Protect" security warning:
+* If you see "Scan app," tap it.
+* If the installation is blocked, tap **"More details"** and select **"Install anyway."**
+
+<br>
+
+### 💻 HTML
+
+**Prerequisites:** Ensure you have [Node.js](https://nodejs.org/) and [serve](https://www.npmjs.com/package/serve) installed.
+
+1. **Download:** Navigate to the [Releases](https://github.com/psychostark/critical-charge/releases) page and download the latest build.
+2. Extract the `.zip` to the folder as `critical-charge`
+3. Open Terminal inside the folder and run:
+```bash
+serve --open
+
+```
+
+
+*This will automatically launch your default browser to run the game in localhost.*
+
+<br>
+
+
+### 💻 For Development
+
+
+**Prerequisites:** Ensure you have [Node.js](https://nodejs.org/) installed.
+
+**Setup:**
+
+1. Clone this repository:
+```bash
+git clone https://github.com/psychostark/critical-charge.git
+```
+
+3. Navigate to the folder: 
+```bash
+cd critical-charge
+```
+
+3. Install dependencies:
+```bash
+npm install
+```
+
+**To Run:**
+```bash
+npx vite preview --open
+
+```
+
+* **To Build:**
+```bash
+npm run build
+
+```
+
+<br>
+
+
+
 
 ## 🎮 How to Play
 
@@ -143,13 +225,6 @@ Critical Charge features a robust save system:
 3. **Jump Clearance**: Time your jumps carefully - you need to be at least 120 pixels high to clear an enemy charger.
 4. **Save Often**: Pause frequently to save your progress, especially when you're doing well.
 5. **Gyroscope Advantage**: On mobile, use the tilt controls for smooth, threshold-based lane changes.
-
-## 🚀 Getting Started
-
-1. Open the game in a **Chromium-based browser** (Chrome, Edge, Opera)
-2. Allow battery status permissions if prompted
-3. Use your preferred controls to start playing
-4. Avoid the chargers and survive as long as possible!
 
 ## 🏗️ Under the Hood (Architecture)
 
