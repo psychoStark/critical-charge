@@ -26,7 +26,7 @@ canvas.addEventListener('touchstart', () => canvas.focus());
 
 // ── Global Test Lab Shortcut (Works instantly on all screens) ──
 window.addEventListener('keydown', (e) => {
-  if (e.key === '`') window.location.href = '/test.html';
+  if (e.key === '`') window.location.href = './test.html';
 });
 
 // ── Boot ─────────────────────────────────────────────────────────────────────

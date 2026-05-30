@@ -140,7 +140,7 @@ export function startEngine(canvasParam) {
     onToggleMute: () => toggleMute(),
     onTestLab: () => {
       playSound('click');
-      window.location.href = window.__TEST_MODE ? '/' : '/test.html';
+      window.location.href = window.__TEST_MODE ? './index.html' : './test.html';
     },
     onToggleControls: () => {
       const next = getControlMethod() === 'swipe' ? 'tilt' : 'swipe';
