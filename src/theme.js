@@ -1,0 +1,30 @@
+// src/theme.js
+// Centralized theme configuration for the game.
+
+export const THEME = {
+  accent: '#a855f7',
+  accentCyan: '#22d3ee',
+  accentYellow: '#fbbf24',
+  accentHot: '#d946ef',
+  textPrimary: '#f3e8ff',
+  textSecond: '#a78bfa',
+  textDim: '#4c1d95',
+  bgPanel: 'rgba(18,0,38,0.75)',
+  borderPanel: 'rgba(124,58,237,0.6)',
+  battCrit: '#f43f5e',
+  battLow: '#fb923c',
+  battMid: '#a855f7',
+  battFull: '#22d3ee',
+  scanline: 'rgba(167,139,250,0.03)',
+  bg: '#0b0014',
+  overlay: 'rgba(11,0,20,0.82)',
+  panelBg: '#120026',
+  panelBorder: '#7c3aed',
+  panelGlow: 'rgba(124,58,237,0.35)',
+  btnBg: '#1e0038',
+  btnHover: '#3b0764',
+  btnBorder: '#7c3aed',
+  btnText: '#e9d5ff',
+  btnDanger: '#be185d',
+  btnDangerBg: '#1a0020',
+};

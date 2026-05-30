@@ -1,5 +1,12 @@
 // src/core/battery.js
 
+import {
+  MIN_SPEED_DEFAULT,
+  MAX_SPEED_DEFAULT,
+  SPEED_EXPONENT_DEFAULT,
+  WIRUS_CORRUPT_THRESHOLD,
+} from '../constants.js';
+
 let batteryRef = null;
 
 // ── W.I.R.U.S. TRACKING VARIABLES ──
@@ -17,9 +24,9 @@ export function resetWirusCount() {
   }
 }
 
-export let MIN_SPEED = 0.8; 
-export let MAX_SPEED = 4.0; 
-export let SPEED_EXPONENT = 1.0; 
+export let MIN_SPEED = MIN_SPEED_DEFAULT;
+export let MAX_SPEED = MAX_SPEED_DEFAULT;
+export let SPEED_EXPONENT = SPEED_EXPONENT_DEFAULT;
 
 export function setBatteryConfig(config) {
   if (config.minSpeed !== undefined) MIN_SPEED = config.minSpeed;
@@ -53,29 +60,23 @@ export async function initBattery(simulatedBattery = null) {
 function _attachWirusListener(battery) {
   isCurrentlyCharging = battery.charging;
 
-  // 1. Listen for charger plug/unplug
+  // Listen for charger plug/unplug
   battery.addEventListener('chargingchange', () => {
     if (battery.charging && !isCurrentlyCharging) {
       plugCount++;
       isCurrentlyCharging = true;
-      if (plugCount >= 3) wirusState = 'corrupted'; 
-      else wirusState = 'hijacked';  
+      if (plugCount >= WIRUS_CORRUPT_THRESHOLD) wirusState = 'corrupted';
+      else wirusState = 'hijacked';
     } else if (!battery.charging && isCurrentlyCharging) {
       isCurrentlyCharging = false;
       if (wirusState === 'corrupted') plugCount = 0;
-      wirusState = 'clean'; 
+      wirusState = 'clean';
     }
-  });
-
-  // 2. NEW: Listen for battery level drops
-  // This ensures the game engine gets fresh data immediately
-  battery.addEventListener('levelchange', () => {
-    console.log(`[Battery] Level changed to: ${(battery.level * 100).toFixed(0)}%`);
   });
 }
 
 export function getBatteryLevel() {
-  if (!batteryRef) return 1.0; 
+  if (!batteryRef) return 1.0;
   return batteryRef.level;
 }
 

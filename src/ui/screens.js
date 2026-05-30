@@ -9,32 +9,12 @@
 // Theme: Purple Cyberpunk
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { loadSettings } from '../systems/settings.js';
 import { playSound } from '../systems/audio.js';
 import { hapticTap } from '../systems/haptics.js';
-
-// ── Theme tokens ─────────────────────────────────────────────────────────────
-const T = {
-  bg:           '#0b0014',
-  overlay:      'rgba(11,0,20,0.82)',
-  panelBg:      '#120026',
-  panelBorder:  '#7c3aed',
-  panelGlow:    'rgba(124,58,237,0.35)',
-  accent:       '#a855f7',       // primary purple
-  accentHot:    '#d946ef',       // pink-purple for danger / game over
-  accentCyan:   '#22d3ee',       // cyan highlight
-  accentYellow: '#fbbf24',       // score / hi-score
-  textPrimary:  '#f3e8ff',
-  textSecond:   '#a78bfa',
-  textDim:      '#4c1d95',
-  btnBg:        '#1e0038',
-  btnHover:     '#3b0764',
-  btnBorder:    '#7c3aed',
-  btnText:      '#e9d5ff',
-  btnDanger:    '#be185d',
-  btnDangerBg:  '#1a0020',
-  scanline:     'rgba(167,139,250,0.04)',
-};
+import { DEBUG } from '../constants.js';
+import { THEME as T } from '../theme.js';
+import { getSetting } from '../config.js';
+import { getScanlinePattern } from '../utils/graphics.js';
 
 // ── Button registry ───────────────────────────────────────────────────────────
 // Every draw call that renders a button pushes to this array.
@@ -42,7 +22,9 @@ const T = {
 // Each entry: { x, y, w, h, action: fn }
 let _buttons = [];
 
-function _clearButtons() { _buttons = []; }
+function _clearButtons() {
+  _buttons = [];
+}
 
 function _registerButton(x, y, w, h, action) {
   _buttons.push({ x, y, w, h, action });
@@ -50,36 +32,38 @@ function _registerButton(x, y, w, h, action) {
 
 // ── Canvas references (set by initScreens) ────────────────────────────────────
 let _canvas = null;
-let _ctx    = null;
-let _W      = 640;
-let _H      = 360;
+let _ctx = null;
+let _W = 640;
+let _H = 360;
 
 // ── External callbacks — wired in initScreens ─────────────────────────────────
-let _onResume  = () => {};
+let _onResume = () => {};
 let _onRestart = () => {};
-let _onSave    = () => {};
-let _onLoad    = () => {};
+let _onSave = () => {};
+let _onLoad = () => {};
 let _onToggleControls = () => {};
-let _onNextSong       = () => {};
-let _onToggleMute     = () => {};
-let _saveMessageTimer = 0; // frames remaining for save success overlay
+let _onNextSong = () => {};
+let _onToggleMute = () => {};
+let _overlayMessageTimer = 0;
+let _overlayMessageText = '';
+let _overlayColor = '#fff';
 let _onTestLab = () => {};
 
 // ── Public init ───────────────────────────────────────────────────────────────
 export function initScreens(canvas, callbacks = {}) {
   _canvas = canvas;
-  _ctx    = canvas.getContext('2d');
-  _W      = canvas.width;
-  _H      = canvas.height;
+  _ctx = canvas.getContext('2d');
+  _W = canvas.width;
+  _H = canvas.height;
 
-  _onResume         = callbacks.onResume         ?? (() => {});
-  _onRestart        = callbacks.onRestart        ?? (() => {});
-  _onSave           = callbacks.onSave           ?? (() => {});
-  _onLoad           = callbacks.onLoad           ?? (() => {});
+  _onResume = callbacks.onResume ?? (() => {});
+  _onRestart = callbacks.onRestart ?? (() => {});
+  _onSave = callbacks.onSave ?? (() => {});
+  _onLoad = callbacks.onLoad ?? (() => {});
   _onToggleControls = callbacks.onToggleControls ?? (() => {});
-  _onNextSong       = callbacks.onNextSong       ?? (() => {}); 
-  _onToggleMute     = callbacks.onToggleMute     ?? (() => {});
-  _onTestLab        = callbacks.onTestLab        ?? (() => {});
+  _onNextSong = callbacks.onNextSong ?? (() => {});
+  _onToggleMute = callbacks.onToggleMute ?? (() => {});
+  _onTestLab = callbacks.onTestLab ?? (() => {});
 
   // Single pointer listener on the canvas — handles both mouse and touch
   canvas.addEventListener('pointerdown', _handlePointer);
@@ -100,12 +84,20 @@ function _handlePointer(e) {
   const x = (e.clientX - rect.left - offsetX) / scale;
   const y = (e.clientY - rect.top - offsetY) / scale;
 
-  console.log('[Screens] _handlePointer', { clientX: e.clientX, clientY: e.clientY, mappedX: x, mappedY: y, buttonCount: _buttons.length, pointerType: e.pointerType });
+  if (DEBUG)
+    console.log('[Screens] _handlePointer', {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      mappedX: x,
+      mappedY: y,
+      buttonCount: _buttons.length,
+      pointerType: e.pointerType,
+    });
 
   let hit = false;
   for (const btn of _buttons) {
     if (x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h) {
-      console.log('[Screens] button HIT — firing action');
+      if (DEBUG) console.log('[Screens] button HIT — firing action');
       e.preventDefault(); // only prevent default if a button is actually hit
       playSound('click');
       hapticTap();
@@ -119,7 +111,7 @@ function _handlePointer(e) {
     }
   }
   if (!hit) {
-    console.log('[Screens] no button hit');
+    if (DEBUG) console.log('[Screens] no button hit');
     // If pause overlay is active, any tap should resume the game
     if (typeof _onResume === 'function') {
       _onResume();
@@ -131,13 +123,9 @@ function _handlePointer(e) {
 // SHARED DRAW HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Scanline pass — call over any overlay for the CRT feel
+// Scanline pass — uses pre-rendered pattern for performance
 function _drawScanlines() {
-  const ctx = _ctx;
-  for (let y = 0; y < _H; y += 3) {
-    ctx.fillStyle = T.scanline;
-    ctx.fillRect(0, y, _W, 1);
-  }
+  _ctx.drawImage(getScanlinePattern(_W, _H), 0, 0);
 }
 
 // Glowing panel box
@@ -145,16 +133,16 @@ function _drawPanel(x, y, w, h, glowColor = T.panelGlow) {
   const ctx = _ctx;
   // Glow
   ctx.shadowColor = glowColor;
-  ctx.shadowBlur  = 24;
-  ctx.fillStyle   = T.panelBg;
+  ctx.shadowBlur = 24;
+  ctx.fillStyle = T.panelBg;
   ctx.fillRect(x, y, w, h);
-  ctx.shadowBlur  = 0;
+  ctx.shadowBlur = 0;
   // Border — double line cyberpunk style
   ctx.strokeStyle = T.panelBorder;
-  ctx.lineWidth   = 1.5;
-  ctx.strokeRect(x,     y,     w,     h);
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(x, y, w, h);
   ctx.strokeStyle = 'rgba(124,58,237,0.3)';
-  ctx.lineWidth   = 0.5;
+  ctx.lineWidth = 0.5;
   ctx.strokeRect(x + 3, y + 3, w - 6, h - 6);
 }
 
@@ -162,17 +150,17 @@ function _drawPanel(x, y, w, h, glowColor = T.panelGlow) {
 function _drawCorners(x, y, w, h, size = 10) {
   const ctx = _ctx;
   ctx.strokeStyle = T.accentCyan;
-  ctx.lineWidth   = 1.5;
+  ctx.lineWidth = 1.5;
   const corners = [
-    [x,     y,     size, 0,    0,    size],
-    [x+w,   y,    -size, 0,    0,    size],
-    [x,     y+h,   size, 0,    0,   -size],
-    [x+w,   y+h,  -size, 0,    0,   -size],
+    [x, y, size, 0, 0, size],
+    [x + w, y, -size, 0, 0, size],
+    [x, y + h, size, 0, 0, -size],
+    [x + w, y + h, -size, 0, 0, -size],
   ];
   corners.forEach(([ox, oy, dx1, dy1, dx2, dy2]) => {
     ctx.beginPath();
     ctx.moveTo(ox + dx1, oy + dy1);
-    ctx.lineTo(ox,       oy);
+    ctx.lineTo(ox, oy);
     ctx.lineTo(ox + dx2, oy + dy2);
     ctx.stroke();
   });
@@ -181,37 +169,37 @@ function _drawCorners(x, y, w, h, size = 10) {
 // Cyberpunk button — registers itself in _buttons
 function _drawButton(label, x, y, w, h, action, variant = 'default') {
   const ctx = _ctx;
-  const isHot = variant === 'hot';   // pink accent
-  const isDim = variant === 'dim';   // muted
+  const isHot = variant === 'hot'; // pink accent
+  const isDim = variant === 'dim'; // muted
 
-  const bg     = isHot ? T.btnDangerBg : T.btnBg;
-  const border = isHot ? T.btnDanger   : isDim ? T.textDim : T.btnBorder;
-  const text   = isHot ? '#f9a8d4'     : T.btnText;
-  const glow   = isHot ? 'rgba(190,24,93,0.4)' : T.panelGlow;
+  const bg = isHot ? T.btnDangerBg : T.btnBg;
+  const border = isHot ? T.btnDanger : isDim ? T.textDim : T.btnBorder;
+  const text = isHot ? '#f9a8d4' : T.btnText;
+  const glow = isHot ? 'rgba(190,24,93,0.4)' : T.panelGlow;
 
   // Panel
   ctx.shadowColor = glow;
-  ctx.shadowBlur  = 12;
-  ctx.fillStyle   = bg;
+  ctx.shadowBlur = 12;
+  ctx.fillStyle = bg;
   ctx.fillRect(x, y, w, h);
-  ctx.shadowBlur  = 0;
+  ctx.shadowBlur = 0;
 
   ctx.strokeStyle = border;
-  ctx.lineWidth   = 1.5;
+  ctx.lineWidth = 1.5;
   ctx.strokeRect(x, y, w, h);
 
   // Diagonal slash accent top-right corner
   ctx.strokeStyle = isHot ? '#f472b6' : T.accentCyan;
-  ctx.lineWidth   = 0.5;
+  ctx.lineWidth = 0.5;
   ctx.beginPath();
   ctx.moveTo(x + w - 14, y);
-  ctx.lineTo(x + w,      y + 14);
+  ctx.lineTo(x + w, y + 14);
   ctx.stroke();
 
   // Label
-  ctx.fillStyle   = text;
-  ctx.font        = 'bold 15px monospace';
-  ctx.textAlign   = 'center';
+  ctx.fillStyle = text;
+  ctx.font = 'bold 15px monospace';
+  ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(label, x + w / 2, y + h / 2);
   ctx.textBaseline = 'alphabetic';
@@ -220,12 +208,16 @@ function _drawButton(label, x, y, w, h, action, variant = 'default') {
   _registerButton(x, y, w, h, action);
 }
 
+// Pre-generated static noise pattern for border stripes
+const _noisePattern = Array.from({ length: 200 }, () => Math.random() > 0.5);
+
 // Pixel-noise border stripe (top and bottom of overlays)
 function _drawNoiseBorder(y, w) {
   const ctx = _ctx;
   ctx.fillStyle = T.accentCyan;
   for (let i = 0; i < w; i += 4) {
-    if (Math.random() > 0.5) ctx.fillRect(i, y, 2, 1);
+    const idx = Math.floor(i / 4) % _noisePattern.length;
+    if (_noisePattern[idx]) ctx.fillRect(i, y, 2, 1);
   }
 }
 
@@ -233,27 +225,29 @@ function _drawNoiseBorder(y, w) {
 // PAUSE SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
 export function renderPauseScreen(score, highScore, isMuted = false) {
-  const ctx  = _ctx;
+  const ctx = _ctx;
   _clearButtons();
 
   // Dim overlay
   ctx.fillStyle = T.overlay;
   ctx.fillRect(0, 0, _W, _H);
   _drawScanlines();
-  _drawNoiseBorder(0,  _W);
+  _drawNoiseBorder(0, _W);
   _drawNoiseBorder(_H - 1, _W);
 
-  const settings = loadSettings();
-  const hasTilt  = settings.hasTiltSensor;
-  const method   = settings.controlMethod ?? 'swipe';
+  const hasTilt = getSetting('hasTiltSensor') ?? false;
+  const method = getSetting('controlMethod') ?? 'swipe';
 
   // How many buttons?
-  const btnCount   = hasTilt ? 8 : 7;  
-  const BW = 220, BH = 48, GAP = 14;
-  const totalBtnH  = btnCount * BH + (btnCount - 1) * GAP;
+  const btnCount = hasTilt ? 8 : 7;
+  const BW = 220,
+    BH = 48,
+    GAP = 14;
+  const totalBtnH = btnCount * BH + (btnCount - 1) * GAP;
 
   // Panel sizing
-  const PW = 300, PH = totalBtnH + 160; // Adjusted padding slightly to fit the tall menu
+  const PW = 300,
+    PH = totalBtnH + 160; // Adjusted padding slightly to fit the tall menu
   const PX = _W / 2 - PW / 2;
   const PY = _H / 2 - PH / 2;
 
@@ -262,22 +256,22 @@ export function renderPauseScreen(score, highScore, isMuted = false) {
 
   // ── Title ──
   ctx.fillStyle = T.accent;
-  ctx.font      = 'bold 11px monospace';
+  ctx.font = 'bold 11px monospace';
   ctx.textAlign = 'center';
   ctx.fillText('// SYSTEM INTERRUPT //', _W / 2, PY + 22);
 
   ctx.shadowColor = T.accentCyan;
-  ctx.shadowBlur  = 14;
-  ctx.fillStyle   = T.textPrimary;
-  ctx.font        = 'bold 26px monospace';
+  ctx.shadowBlur = 14;
+  ctx.fillStyle = T.textPrimary;
+  ctx.font = 'bold 26px monospace';
   ctx.fillText('CRITICAL BREAK', _W / 2, PY + 52);
-  ctx.shadowBlur  = 0;
+  ctx.shadowBlur = 0;
 
   // Score strip
   ctx.fillStyle = T.textDim;
   ctx.fillRect(PX + 1, PY + 64, PW - 2, 1);
   ctx.fillStyle = T.accentYellow;
-  ctx.font      = '13px monospace';
+  ctx.font = '13px monospace';
   ctx.fillText(`SCORE  ${Math.floor(score)}   HI  ${Math.floor(highScore)}`, _W / 2, PY + 82);
 
   ctx.fillStyle = T.textDim;
@@ -287,19 +281,19 @@ export function renderPauseScreen(score, highScore, isMuted = false) {
   let BY = PY + 108;
   const BX = _W / 2 - BW / 2;
 
-  _drawButton('▶  RESUME',          BX, BY, BW, BH, _onResume);
+  _drawButton('▶  RESUME', BX, BY, BW, BH, _onResume);
   BY += BH + GAP;
-  _drawButton('🔄  RESTART',       BX, BY, BW, BH, _onRestart, 'hot'); 
+  _drawButton('🔄  RESTART', BX, BY, BW, BH, _onRestart, 'hot');
   BY += BH + GAP;
-  _drawButton('💾  SAVE GAME',      BX, BY, BW, BH, _onSave,   'dim');
+  _drawButton('💾  SAVE GAME', BX, BY, BW, BH, _onSave, 'dim');
   BY += BH + GAP;
-  _drawButton('📂  LOAD GAME',      BX, BY, BW, BH, _onLoad,   'dim');
+  _drawButton('📂  LOAD GAME', BX, BY, BW, BH, _onLoad, 'dim');
   BY += BH + GAP;
-  _drawButton('▶▶  NEXT TRACK',     BX, BY, BW, BH, _onNextSong,   'dim');
+  _drawButton('▶▶  NEXT TRACK', BX, BY, BW, BH, _onNextSong, 'dim');
   BY += BH + GAP;
-  
+
   const muteText = isMuted ? '🔊  UNMUTE AUDIO' : '🔇  MUTE AUDIO';
-  _drawButton(muteText,             BX, BY, BW, BH, _onToggleMute, 'dim');
+  _drawButton(muteText, BX, BY, BW, BH, _onToggleMute, 'dim');
 
   if (hasTilt) {
     BY += BH + GAP;
@@ -308,34 +302,13 @@ export function renderPauseScreen(score, highScore, isMuted = false) {
 
   BY += BH + GAP;
   const testBtnText = window.__TEST_MODE ? '❌  EXIT TEST' : '🧪  TEST MODE';
-  _drawButton(testBtnText,       BX, BY, BW, BH, _onTestLab, 'dim');
+  _drawButton(testBtnText, BX, BY, BW, BH, _onTestLab, 'dim');
 
   // Swipe-down hint
-  ctx.fillStyle   = T.textDim;
-  ctx.font        = '10px monospace';
-  ctx.textAlign   = 'center';
+  ctx.fillStyle = T.textDim;
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'center';
   ctx.fillText('Tap anywhere to resume', _W / 2, PY + PH - 10);
-
-  // Save success overlay (centered inside pause panel)
-  if (_saveMessageTimer > 0) {
-    console.log('[Screens] displaying save success overlay, timer:', _saveMessageTimer);
-    const msg = 'SAVE SUCCESSFUL';
-    const msgW = 200, msgH = 40;
-    // Fixed position at top center of canvas for visibility
-    const msgX = _W / 2 - msgW / 2;
-    const msgY = 20;
-    ctx.fillStyle = 'rgba(0,0,0,0.8)';
-    ctx.fillRect(msgX, msgY, msgW, msgH);
-    ctx.strokeStyle = '#fff';
-    ctx.strokeRect(msgX, msgY, msgW, msgH);
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 16px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(msg, _W / 2, msgY + msgH / 2);
-    ctx.textBaseline = 'alphabetic';
-    _saveMessageTimer--;
-  }
 
 }
 
@@ -349,11 +322,14 @@ export function renderGameOverScreen(score, highScore, isNewHighScore = false) {
   ctx.fillStyle = 'rgba(11,0,20,0.88)';
   ctx.fillRect(0, 0, _W, _H);
   _drawScanlines();
-  _drawNoiseBorder(0,  _W);
+  _drawNoiseBorder(0, _W);
   _drawNoiseBorder(_H - 1, _W);
 
-  const BW = 220, BH = 48, GAP = 14;
-  const PW = 300, PH = 260;
+  const BW = 220,
+    BH = 48,
+    GAP = 14;
+  const PW = 300,
+    PH = 260;
   const PX = _W / 2 - PW / 2;
   const PY = _H / 2 - PH / 2 + 10;
 
@@ -362,36 +338,36 @@ export function renderGameOverScreen(score, highScore, isNewHighScore = false) {
 
   // ── Title ──
   ctx.fillStyle = T.accentHot;
-  ctx.font      = 'bold 11px monospace';
+  ctx.font = 'bold 11px monospace';
   ctx.textAlign = 'center';
   ctx.fillText('// POWER DEPLETED //', _W / 2, PY + 22);
 
   ctx.shadowColor = T.accentHot;
-  ctx.shadowBlur  = 18;
-  ctx.fillStyle   = '#fda4af';
-  ctx.font        = 'bold 28px monospace';
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = '#fda4af';
+  ctx.font = 'bold 28px monospace';
   ctx.fillText('CRITICAL FAILURE', _W / 2, PY + 54);
-  ctx.shadowBlur  = 0;
+  ctx.shadowBlur = 0;
 
   // Score strip
   ctx.fillStyle = T.textDim;
   ctx.fillRect(PX + 1, PY + 68, PW - 2, 1);
 
-  ctx.fillStyle   = '#fff';
-  ctx.font        = '14px monospace';
-  ctx.textAlign   = 'center';
+  ctx.fillStyle = '#fff';
+  ctx.font = '14px monospace';
+  ctx.textAlign = 'center';
   ctx.fillText(`SCORE  ${Math.floor(score)}`, _W / 2, PY + 86);
 
   if (isNewHighScore) {
     ctx.shadowColor = T.accentYellow;
-    ctx.shadowBlur  = 10;
-    ctx.fillStyle   = T.accentYellow;
-    ctx.font        = 'bold 13px monospace';
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = T.accentYellow;
+    ctx.font = 'bold 13px monospace';
     ctx.fillText('★  NEW RECORD  ★', _W / 2, PY + 106);
-    ctx.shadowBlur  = 0;
+    ctx.shadowBlur = 0;
   } else {
     ctx.fillStyle = T.textSecond;
-    ctx.font      = '12px monospace';
+    ctx.font = '12px monospace';
     ctx.fillText(`BEST  ${Math.floor(highScore)}`, _W / 2, PY + 106);
   }
 
@@ -400,53 +376,53 @@ export function renderGameOverScreen(score, highScore, isNewHighScore = false) {
 
   // ── Buttons ──
   const BX = _W / 2 - BW / 2;
-  let BY   = PY + 132;
+  let BY = PY + 132;
 
-  _drawButton('🔄  RESTART',    BX, BY, BW, BH, _onRestart, 'hot');
+  _drawButton('🔄  RESTART', BX, BY, BW, BH, _onRestart, 'hot');
   BY += BH + GAP;
-  _drawButton('📂  LOAD GAME', BX, BY, BW, BH, _onLoad,    'dim');
+  _drawButton('📂  LOAD GAME', BX, BY, BW, BH, _onLoad, 'dim');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UNSUPPORTED HARDWARE SCREEN (Battery API unavailable)
 // ─────────────────────────────────────────────────────────────────────────────
 export function renderUnsupportedScreen() {
-    const ctx = _ctx;
-    _clearButtons();
+  const ctx = _ctx;
+  _clearButtons();
 
-    ctx.fillStyle = T.bg;
-    ctx.fillRect(0, 0, _W, _H);
-    _drawScanlines();
+  ctx.fillStyle = T.bg;
+  ctx.fillRect(0, 0, _W, _H);
+  _drawScanlines();
 
-    const PW = 420, PH = 200;
-    const PX = _W / 2 - PW / 2;
-    const PY = _H / 2 - PH / 2;
+  const PW = 420,
+    PH = 200;
+  const PX = _W / 2 - PW / 2;
+  const PY = _H / 2 - PH / 2;
 
-    _drawPanel(PX, PY, PW, PH, 'rgba(239,68,68,0.25)');
-    _drawCorners(PX, PY, PW, PH);
+  _drawPanel(PX, PY, PW, PH, 'rgba(239,68,68,0.25)');
+  _drawCorners(PX, PY, PW, PH);
 
-    ctx.shadowColor = '#ef4444';
-    ctx.shadowBlur  = 16;
-    ctx.fillStyle   = '#fca5a5';
-    ctx.font        = 'bold 22px monospace';
-    ctx.textAlign   = 'center';
-    ctx.fillText('HARDWARE UNSUPPORTED', _W / 2, PY + 56);
-    ctx.shadowBlur  = 0;
+  ctx.shadowColor = '#ef4444';
+  ctx.shadowBlur = 16;
+  ctx.fillStyle = '#fca5a5';
+  ctx.font = 'bold 22px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('HARDWARE UNSUPPORTED', _W / 2, PY + 56);
+  ctx.shadowBlur = 0;
 
-    ctx.fillStyle   = T.textSecond;
-    ctx.font        = '12px monospace';
-    ctx.fillText('Battery Status API not available', _W / 2, PY + 86);
-    ctx.fillText('Use Chrome or Edge on Android / macOS / Windows', _W / 2, PY + 106);
+  ctx.fillStyle = T.textSecond;
+  ctx.font = '12px monospace';
+  ctx.fillText('Battery Status API not available', _W / 2, PY + 86);
+  ctx.fillText('Use Chrome or Edge on Android / macOS / Windows', _W / 2, PY + 106);
 
-    ctx.fillStyle = T.textDim;
-    ctx.fillRect(PX + 1, PY + 118, PW - 2, 1);
+  ctx.fillStyle = T.textDim;
+  ctx.fillRect(PX + 1, PY + 118, PW - 2, 1);
 
-    ctx.fillStyle = T.accentCyan;
-    ctx.font      = '11px monospace';
-    ctx.fillText('Critical Charge requires a real battery sensor to play.', _W / 2, PY + 138);
-    ctx.fillText('iOS Safari and Firefox do not support this API.', _W / 2, PY + 156);
+  ctx.fillStyle = T.accentCyan;
+  ctx.font = '11px monospace';
+  ctx.fillText('Critical Charge requires a real battery sensor to play.', _W / 2, PY + 138);
+  ctx.fillText('iOS Safari and Firefox do not support this API.', _W / 2, PY + 156);
 }
-
 
 // ANTI HACK
 
@@ -462,7 +438,8 @@ export function renderHijackedScreen() {
   ctx.fillRect(0, 0, _W, _H);
 
   // Warning Box
-  const boxW = 340, boxH = 200;
+  const boxW = 340,
+    boxH = 200;
   const boxX = _W / 2 - boxW / 2;
   const boxY = _H / 2 - boxH / 2 - 50;
 
@@ -481,7 +458,7 @@ export function renderHijackedScreen() {
   ctx.font = '14px monospace';
   ctx.fillText('Enemy W.I.R.U.S. detected', _W / 2, boxY + 90);
   ctx.fillText('via power grid.', _W / 2, boxY + 110);
-  
+
   ctx.fillStyle = '#ffffff';
   ctx.fillText('Save data purged.', _W / 2, boxY + 140);
   ctx.fillText('Unplug to reboot from zero.', _W / 2, boxY + 160);
@@ -505,37 +482,51 @@ export function renderCorruptedScreen() {
   ctx.font = '14px monospace';
   ctx.fillText('System fully corrupted by', _W / 2, _H / 2 + 10);
   ctx.fillText('W.I.R.U.S. payload.', _W / 2, _H / 2 + 30);
-  
+
   ctx.fillStyle = '#555555';
   ctx.fillText('All memory banks wiped.', _W / 2, _H / 2 + 70);
   ctx.fillText('Awaiting disinfection...', _W / 2, _H / 2 + 90);
 }
 
-
-
-// Exported helper to trigger save success overlay
+// ── UNIFIED MESSAGE OVERLAYS ──
 export function triggerSaveMessage() {
-    _saveMessageTimer = 120; // display for ~2 seconds at 60fps
+  _overlayMessageText = 'SAVE SUCCESSFUL';
+  _overlayColor = '#22c55e'; // Neon Green
+  _overlayMessageTimer = 120;
 }
 
-// Exported helper to render save overlay (used in engine loop for desktop)
+export function triggerLoadErrorMessage() {
+  _overlayMessageText = 'NO SAVE FOUND';
+  _overlayColor = '#ef4444'; // Neon Red
+  _overlayMessageTimer = 120;
+}
+
+export function triggerLoadSuccessMessage() {
+  _overlayMessageText = 'LOAD SUCCESSFUL';
+  _overlayColor = '#22d3ee'; // Neon Cyan
+  _overlayMessageTimer = 120;
+}
+
 export function renderSaveOverlay() {
-    if (_saveMessageTimer <= 0) return;
-    const ctx = _ctx;
-    // Draw overlay at top‑center of canvas for desktop visibility
-    const msg = 'SAVE SUCCESSFUL';
-    const msgW = 200, msgH = 40;
-    const msgX = _W / 2 - msgW / 2;
-    const msgY = 20;
-    ctx.fillStyle = 'rgba(0,0,0,0.8)';
-    ctx.fillRect(msgX, msgY, msgW, msgH);
-    ctx.strokeStyle = '#fff';
-    ctx.strokeRect(msgX, msgY, msgW, msgH);
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 16px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(msg, _W / 2, msgY + msgH / 2);
-    ctx.textBaseline = 'alphabetic';
-    _saveMessageTimer--;
+  if (_overlayMessageTimer <= 0) return;
+  const ctx = _ctx;
+
+  const msgW = 200, msgH = 40;
+  const msgX = _W / 2 - msgW / 2;
+  const msgY = 20;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.9)';
+  ctx.fillRect(msgX, msgY, msgW, msgH);
+
+  ctx.strokeStyle = _overlayColor;
+  ctx.strokeRect(msgX, msgY, msgW, msgH);
+
+  ctx.fillStyle = _overlayColor;
+  ctx.font = 'bold 16px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(_overlayMessageText, _W / 2, msgY + msgH / 2);
+  ctx.textBaseline = 'alphabetic';
+
+  _overlayMessageTimer--;
 }
