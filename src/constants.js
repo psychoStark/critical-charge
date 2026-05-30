@@ -46,7 +46,7 @@ export const HAPTIC_JUMP_MS = 25;
 export const HAPTIC_LAND_MS = 10;
 export const HAPTIC_MOVE_MS = 8;
 export const HAPTIC_CRASH_PATTERN = [100, 30, 200, 30, 400];
-export const HAPTIC_HIJACKED_INTERVAL = 50; // ms
+export const HAPTIC_HIJACKED_INTERVAL = 300; // ms
 export const HAPTIC_HIJACKED_VIBRATE = 150; // ms
 export const HAPTIC_CORRUPTED_INTERVAL = 250; // ms
 

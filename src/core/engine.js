@@ -7,7 +7,7 @@
 import { getBatteryLevel, getBatterySpeed, wirusState, resetWirusCount } from './battery.js';
 import { assetCache } from '../systems/asset-cache.js';
 import { inputState, getControlMethod, setControlMethod } from './input.js';
-import { saveGameData, loadSavedGameData, deleteSavedGame, wipeAllData } from '../systems/save-system.js';
+import { saveGameData, loadSavedGameData, wipeAllData } from '../systems/save-system.js';
 import {
   BGM_TRACKS,
   DEFAULT_SCROLL_SPEED,
@@ -187,7 +187,10 @@ export function startEngine(canvasParam) {
   }
 
   stopBGM();
-  playBGM(bgmTracks[currentTrackIndex].id);
+  // ONLY start music if the device isn't currently hijacked
+  if (wirusState === 'clean') {
+    playBGM(bgmTracks[currentTrackIndex].id);
+  }
   stopHaptics();
   HORIZON_Y = canvasHeight / 2 - 200;
 
@@ -195,11 +198,12 @@ export function startEngine(canvasParam) {
   requestAnimationFrame(gameLoop);
 
   // This waits for the first click, tap, or keypress to force the music to start
-  // Uses a flag to prevent duplicate listener registration across restarts
   if (!window.__unlockAudioRegistered) {
     const unlockAudio = () => {
-      // ── Now it plays the auto-detected track! ──
-      playBGM(bgmTracks[currentTrackIndex].id);
+      // ── Now it plays the auto-detected track ONLY if clean ──
+      if (wirusState === 'clean') {
+         playBGM(bgmTracks[currentTrackIndex].id);
+      }
 
       // Once it plays, we remove these listeners so it doesn't keep triggering
       window.removeEventListener('pointerdown', unlockAudio);
@@ -321,7 +325,6 @@ function gameLoop(time) {
       startHijackedHaptics();
       lastWirusState = 'hijacked';
     }
-    deleteSavedGame();
     resetScore();
     trackPosition = 0;
     renderHijackedScreen();
