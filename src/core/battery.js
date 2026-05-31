@@ -1,108 +1,85 @@
-// battery.js
-// Manages the device's battery status and converts it into game mechanics.
-// The Battery Status API provides real-time battery level (0.0 to 1.0),
-// which directly influences the player's speed in the game.
-// Returns null if the API is unsupported — main.js treats null as a permanent block.
+// src/core/battery.js
 
-/**
- * Internal reference to the BatteryManager object from the Battery Status API.
- * This object provides real-time updates on battery level, charging status, etc.
- * @type {BatteryManager|null}
- */
+import {
+  MIN_SPEED_DEFAULT,
+  MAX_SPEED_DEFAULT,
+  SPEED_EXPONENT_DEFAULT,
+  WIRUS_CORRUPT_THRESHOLD,
+} from '../constants.js';
+
 let batteryRef = null;
 
-/**
- * Minimum speed multiplier when battery is fully charged (100%).
- * At full charge, the player moves at the slowest pace, making the game easier.
- * @type {number}
- */
-export let MIN_SPEED = 0.8; // The slowest the player will move when the battery is full (100%).
+// ── W.I.R.U.S. TRACKING VARIABLES ──
+let plugCount = 0;
+let isCurrentlyCharging = false;
+export let wirusState = 'clean'; // 'clean', 'hijacked', or 'corrupted'
 
-/**
- * Maximum speed multiplier when battery is depleted (0%).
- * At no charge, the player moves 8x faster, making the game much harder.
- * This creates urgency as the battery drains!
- * @type {number}
- */
-export let MAX_SPEED = 4.0; // The fastest the player will move when the battery is empty (0%).
+export function resetWirusCount() {
+  if (isCurrentlyCharging) {
+    plugCount = 1;
+    wirusState = 'hijacked';
+  } else {
+    plugCount = 0;
+    wirusState = 'clean';
+  }
+}
 
-/**
- * Curve exponent for battery speed calculation.
- * @type {number}
- */
-export let SPEED_EXPONENT = 1.0; // Adjusts how quickly speed changes as the battery drains. Higher values make speed increase more rapidly.
+export let MIN_SPEED = MIN_SPEED_DEFAULT;
+export let MAX_SPEED = MAX_SPEED_DEFAULT;
+export let SPEED_EXPONENT = SPEED_EXPONENT_DEFAULT;
 
-/**
- * Sets battery configuration for testing purposes.
- * @param {Object} config - Configuration object
- * @param {number} [config.minSpeed] - Minimum speed multiplier
- * @param {number} [config.maxSpeed] - Maximum speed multiplier
- * @param {number} [config.exp] - Curve exponent
- */
 export function setBatteryConfig(config) {
   if (config.minSpeed !== undefined) MIN_SPEED = config.minSpeed;
   if (config.maxSpeed !== undefined) MAX_SPEED = config.maxSpeed;
   if (config.exp !== undefined) SPEED_EXPONENT = config.exp;
 }
 
-/**
- * Initializes the Battery Status API connection.
- * This function attempts to access the device's battery information.
- * If successful, it returns the BatteryManager object; otherwise, it returns null.
- *
- * @param {Object|null} simulatedBattery - Optional simulated battery object for testing
- * @returns {Promise<BatteryManager|null>} BatteryManager object if supported, otherwise null
- */
 export async function initBattery(simulatedBattery = null) {
-  // If a simulated battery is provided (test mode), use it directly
   if (simulatedBattery) {
     batteryRef = simulatedBattery;
+    _attachWirusListener(batteryRef);
     return batteryRef;
   }
 
-  // navigator.getBattery is undefined on iOS Safari and Firefox
   if (!navigator.getBattery) {
     return null;
   }
 
   try {
+    // ── Force a fresh fetch ──
     batteryRef = await navigator.getBattery();
+    _attachWirusListener(batteryRef);
     return batteryRef;
   } catch (err) {
-    // API exists but threw (e.g., permission denied on some Android builds)
     console.warn('Battery API failed:', err);
     return null;
   }
 }
 
-/**
- * Retrieves the current battery level from the BatteryManager.
- * This function is called every frame by the game engine to adjust gameplay.
- *
- * Battery Level Effects:
- * - At 100% charge (1.0), the player moves at the slowest speed (MIN_SPEED)
- * - At 0% charge (0.0), the player moves at the fastest speed (MAX_SPEED)
- * - This creates a challenging dynamic: lower battery = harder gameplay!
- *
- * @returns {number} Current battery level (0.0 to 1.0), or 1.0 if API is unsupported
- */
+// ── W.I.R.U.S. LOGIC ──
+function _attachWirusListener(battery) {
+  isCurrentlyCharging = battery.charging;
+
+  // Listen for charger plug/unplug
+  battery.addEventListener('chargingchange', () => {
+    if (battery.charging && !isCurrentlyCharging) {
+      plugCount++;
+      isCurrentlyCharging = true;
+      if (plugCount >= WIRUS_CORRUPT_THRESHOLD) wirusState = 'corrupted';
+      else wirusState = 'hijacked';
+    } else if (!battery.charging && isCurrentlyCharging) {
+      isCurrentlyCharging = false;
+      if (wirusState === 'corrupted') plugCount = 0;
+      wirusState = 'clean';
+    }
+  });
+}
+
 export function getBatteryLevel() {
-  if (!batteryRef) return 1.0; // safe fallback: treat as full
+  if (!batteryRef) return 1.0;
   return batteryRef.level;
 }
 
-/**
- * Converts battery level into game speed using an inverse relationship.
- * This creates the core gameplay mechanic: lower battery = higher speed.
- *
- * Speed Calculation:
- * - MIN_SPEED: Speed when battery is at 100% (1.0)
- * - MAX_SPEED: Speed when battery is at 0% (8.0)
- * - The formula creates a progression between these extremes based on exponent
- *
- * @param {number} level - Current battery level (0.0 to 1.0)
- * @returns {number} Game speed multiplier based on battery level
- */
 export function getBatterySpeed(level) {
   const t = Math.pow(1.0 - level, SPEED_EXPONENT);
   return MIN_SPEED + (MAX_SPEED - MIN_SPEED) * t;

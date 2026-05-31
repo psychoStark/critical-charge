@@ -2,19 +2,21 @@
 // Entry point — boot sequence runs top to bottom, hard-stops on any failure.
 // Order: Battery gate → Asset preload → Input init → Tilt detect → Control select → Engine start
 
-import { initBattery }                         from './core/battery.js';
-import { startEngine, initEngineKeyBindings }  from './core/engine.js';
-import { preloadAssets }                       from './systems/asset-cache.js';
-import { initInput, checkTiltSensor,
-         setControlMethod }                    from './core/input.js';
-import { loadSettings, saveSettings }          from './systems/settings.js';
-import { initScreens, renderUnsupportedScreen }from './ui/screens.js';
-import { initScore }                           from './systems/score.js';
+import { initBattery } from './core/battery.js';
+import { startEngine, initEngineKeyBindings } from './core/engine.js';
+import { preloadAssets } from './systems/asset-cache.js';
+import { initInput, checkTiltSensor, setControlMethod } from './core/input.js';
+import { loadSettings, saveSettings } from './systems/settings.js';
+import { DEBUG } from './constants.js';
+import { initScreens, renderUnsupportedScreen } from './ui/screens.js';
+import { initScore } from './systems/score.js';
+import { playSound } from './systems/audio.js';
+import { hapticTap } from './systems/haptics.js';
 
 // ── Canvas setup — fixed internal resolution ─────────────────────────────────
-const canvas        = document.getElementById('game');
-canvas.width        = 720;
-canvas.height       = 1280;
+const canvas = document.getElementById('game');
+canvas.width = 720;
+canvas.height = 1280;
 // Make canvas focusable to capture keyboard events on mobile
 canvas.setAttribute('tabindex', '0');
 canvas.focus();
@@ -22,55 +24,59 @@ canvas.focus();
 canvas.addEventListener('click', () => canvas.focus());
 canvas.addEventListener('touchstart', () => canvas.focus());
 
+// ── Global Test Lab Shortcut (Works instantly on all screens) ──
+window.addEventListener('keydown', (e) => {
+  if (e.key === '`') window.location.href = './test.html';
+});
+
 // ── Boot ─────────────────────────────────────────────────────────────────────
 async function boot() {
+  // ── 1. HARDWARE GATE ──────────────────────────────────────────────────────
+  const battery = await initBattery();
 
-    // ── 1. HARDWARE GATE ──────────────────────────────────────────────────────
-   const battery = await initBattery();
+  if (!battery) {
+    // 1. Initialize the screens system with your canvas dimensions and context
+    initScreens(canvas);
 
-   if (!battery) {
-     // 1. Initialize the screens system with your canvas dimensions and context
-     initScreens(canvas);
+    // 2. Clear the canvas and render the unsupported panel
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    renderUnsupportedScreen();
 
-     // 2. Clear the canvas and render the unsupported panel
-     const ctx = canvas.getContext('2d');
-     ctx.clearRect(0, 0, canvas.width, canvas.height);
-     renderUnsupportedScreen();
-     
-     return; // hard stop — nothing else runs
-   }
+    return; // hard stop — nothing else runs
+  }
 
-   // ── 2. ASSET PRELOAD ──────────────────────────────────────────────────────
-   await preloadAssets();
+  // ── 2. ASSET PRELOAD ──────────────────────────────────────────────────────
+  await preloadAssets();
 
-   // ── 3. INPUT INIT ─────────────────────────────────────────────────────────
-   // Sets up keyboard, touch-swipe, tilt, and mouse-fallback listeners.
-   // Registers once here — never re-registered on restart.
-   initInput();
+  // ── 3. INPUT INIT ─────────────────────────────────────────────────────────
+  // Sets up keyboard, touch-swipe, tilt, and mouse-fallback listeners.
+  // Registers once here — never re-registered on restart.
+  initInput();
 
-   // ── 4. ENGINE KEY BINDINGS ────────────────────────────────────────────────
-   // Escape/P = pause, Space = restart (when dead), L = load save.
-   // Also registered once here — not inside startEngine.
-   initEngineKeyBindings();
+  // ── 4. ENGINE KEY BINDINGS ────────────────────────────────────────────────
+  // Escape/P = pause, Space = restart (when dead), L = load save.
+  // Also registered once here — not inside startEngine.
+  initEngineKeyBindings();
 
-   // Add a global keydown logger for debugging
-   window.addEventListener('keydown', e => console.log('[Global] keydown test', e.key));
+  // Add a global keydown logger for debugging
+  if (DEBUG) window.addEventListener('keydown', (e) => console.log('[Global] keydown test', e.key));
 
-   // ── 5. TILT SENSOR DETECTION ──────────────────────────────────────────────
-   const hasTiltSensor = await checkTiltSensor();
-   const settings      = loadSettings();
-   settings.hasTiltSensor = hasTiltSensor;
-   saveSettings(settings);
+  // ── 5. TILT SENSOR DETECTION ──────────────────────────────────────────────
+  const hasTiltSensor = await checkTiltSensor();
+  const settings = loadSettings();
+  settings.hasTiltSensor = hasTiltSensor;
+  saveSettings(settings);
 
-   // ── 6. CONTROL SELECTION or DIRECT LAUNCH ────────────────────────────────
-   initScore();
-   if (hasTiltSensor) {
-     showControlSelectScreen(canvas);
-   } else {
-     setControlMethod('swipe');
-     startEngine(canvas);
-   }
- }
+  // ── 6. CONTROL SELECTION or DIRECT LAUNCH ────────────────────────────────
+  initScore();
+  if (hasTiltSensor) {
+    showControlSelectScreen(canvas);
+  } else {
+    setControlMethod('swipe');
+    startEngine(canvas);
+  }
+}
 
 // ── Control selection screen ──────────────────────────────────────────────────
 // Pure DOM — sits above the canvas, removed when a choice is made.
@@ -277,12 +283,16 @@ function showControlSelectScreen(canvas) {
 
   // ── Button handlers ───────────────────────────────────────────────────────
   document.getElementById('btnSwipe').addEventListener('click', () => {
+    playSound('click');
+    hapticTap();
     setControlMethod('swipe');
     _dismissControlScreen(el, style);
     startEngine(canvas);
   });
 
   document.getElementById('btnTilt').addEventListener('click', () => {
+    playSound('click');
+    hapticTap();
     setControlMethod('tilt');
     _dismissControlScreen(el, style);
     startEngine(canvas);
@@ -292,9 +302,9 @@ function showControlSelectScreen(canvas) {
 function _dismissControlScreen(el, style) {
   // Fade out before removing for a clean transition
   el.style.transition = 'opacity 0.25s';
-  el.style.opacity    = '0';
+  el.style.opacity = '0';
   setTimeout(() => {
-    if (el.parentNode)    el.parentNode.removeChild(el);
+    if (el.parentNode) el.parentNode.removeChild(el);
     if (style.parentNode) style.parentNode.removeChild(style);
   }, 260);
 }

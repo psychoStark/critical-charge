@@ -13,6 +13,10 @@ dist-ssr
 *.local
 criticalcharge.code-workspace
 
+
+android/
+
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -35,5 +39,4 @@ hud-battery.svg
 obstacle-barrier.svg
 bstacle-gate.svg
 player.svg
-
 /junk

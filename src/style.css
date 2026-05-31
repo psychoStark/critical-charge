@@ -1,5 +1,7 @@
 /* ── Reset ───────────────────────────────────────────────── */
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -17,7 +19,7 @@ body {
 }
 
 /* ── Canvas: CSS scales it to fill screen.
-   Internal resolution stays 640×360 (set in main.js).
+   Internal resolution stays 720×1280 (set in main.js).
    pixelated keeps the GBA pixel-art look crisp. ─────────── */
 #game {
   position: absolute;
@@ -33,7 +35,7 @@ body {
 
 /* ── Unsupported screen: hidden by default ───────────────── */
 #screen-unsupported {
-  display: none;           /* battery.js sets this to flex */
+  display: none; /* battery.js sets this to flex */
   position: absolute;
   inset: 0;
   align-items: center;
