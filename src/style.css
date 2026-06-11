@@ -9,13 +9,24 @@
 
 /* ── Body: full black viewport, nothing overflows ────────── */
 body {
-  background: #000;
+  /* Prevent pull-to-refresh on Android & rubber-banding on iOS */
+  overscroll-behavior-y: none;
+  touch-action: none; 
+  
+  /* Prevent text highlighting across all browsers */
+  user-select: none;
+  -webkit-user-select: none;
+  
+  /* Remove the tap highlight box on mobile */
+  -webkit-tap-highlight-color: transparent;
+  
+  /* Lock the screen size */
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  margin: 0;
+  padding: 0;
+  background-color: #222222;
 }
 
 /* ── Canvas: CSS scales it to fill screen.
@@ -27,6 +38,8 @@ body {
   width: 100vw;
   height: 100vh;
   object-fit: contain;
+  max-width: 100%;
+  max-height: 100%;
   image-rendering: pixelated;
   image-rendering: crisp-edges; /* Safari fallback */
   display: block;
